@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Computed, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -13,6 +14,7 @@ class Reference(Base):
     __tablename__ = "references"
     __table_args__ = (
         UniqueConstraint("document_id", "order_index", name="uq_references_document_order"),
+        Index("ix_references_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -28,6 +30,10 @@ class Reference(Base):
     page_end: Mapped[int] = mapped_column(Integer)
 
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_vector: Mapped[object] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(raw_text, ''))", persisted=True),
+    )
     authors_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)

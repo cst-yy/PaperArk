@@ -1,9 +1,9 @@
 import { api } from "@/services/api";
-import type { SearchResponse } from "./types";
+import type { SearchPageResponse } from "./types";
 
-export async function search(query: string, limit: number = 20): Promise<SearchResponse> {
-  const response = await api.get<SearchResponse>("/search/", {
-    params: { q: query, limit },
+export async function search(query: string, page = 1, pageSize = 20): Promise<SearchPageResponse> {
+  const response = await api.get<SearchPageResponse>("/search/", {
+    params: { q: query, page, page_size: pageSize },
   });
   return response.data;
 }

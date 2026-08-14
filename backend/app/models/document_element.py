@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, Computed, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -16,6 +17,7 @@ class DocumentElement(Base):
             "element_type IN ('figure', 'table')", name="ck_document_elements_type"
         ),
         UniqueConstraint("document_id", "order_index", name="uq_document_elements_order"),
+        Index("ix_document_elements_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -31,6 +33,10 @@ class DocumentElement(Base):
 
     label: Mapped[str | None] = mapped_column(String(128), nullable=True)
     caption: Mapped[str] = mapped_column(Text)
+    search_vector: Mapped[object] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('simple', coalesce(label, '') || ' ' || coalesce(caption, ''))", persisted=True),
+    )
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Normalized PDF coordinates. All four are NULL when a visual region cannot

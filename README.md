@@ -709,6 +709,24 @@ ElementDetector 采用 caption-first 策略：识别 Figure/Fig./Table/图/表�
 
 Elements 纳入同一 `DerivedDocumentSnapshot`，替换顺序为 Elements → References → Chunks → Sections，再插入新快照；任一检测或校验异常都会保留旧快照。`GET /api/documents/{document_id}/elements?element_type=figure|table` 经过用户隔离，Reader “图表”入口按 Figures/Tables 展示并跳转页码。
 
+### S8-A：Unified Search Contract + Paper-level Aggregation
+
+`GET /api/search?q=...&page=1&page_size=20` 现在返回稳定的 Paper-level contract：一篇 Paper 永远只对应一个搜索结果，`total` 为命中 Paper 数，分页在 hit 聚合之后执行。内部统一使用 `SearchHit`，来源固定为 title/abstract/author/tag/keyword/doi/arxiv/journal/conference/publisher/section/chunk/reference/figure/table。
+
+搜索由 Metadata、Section、Chunk、Reference、Element 五类 provider 分别产生 hit，再按 `paper_id` 聚合。首版权重只用于稳定排序，每篇 Paper 最多返回 5 条按来源权重和页码排序、经简单文本 fingerprint 去重的 matches，同时通过 `match_count` 保留完整命中数。所有派生 provider 均经 Document → Paper 的 user scope 隔离；本阶段只使用 PostgreSQL `ILIKE`，未引入 FTS、`pg_trgm`、embedding、semantic search、RRF、reranker、query expansion 或 AI search。
+
+### S8-B：Search Quality, Query Capability & Performance
+
+S8-A 的 Paper-level API contract 与前端 DTO 保持不变。查询现在统一进行空白折叠、case normalization、DOI/arXiv 前缀清理与识别；少于两个字符的普通查询直接拒绝。DOI/arXiv 使用 Paper/Reference 精确 shortcut，避免无意义全文扫描。
+
+短元数据（论文标题、作者、Tag、Keyword、期刊、会议、出版社）使用 `pg_trgm` 支持 exact、prefix 与 fuzzy 命中；DOI/arXiv 不依赖 trigram。Chunk、Section、Reference 与 Figure/Table caption 使用 `simple` dictionary 的 generated `tsvector`、GIN 和 `websearch_to_tsquery`，多词查询采用 AND-like websearch 语义。后端 snippet 始终为最多约 240 字符的纯文本上下文，不包含 HTML。
+
+Provider 将 exact/prefix/fuzzy/fulltext 分数归一化到 0–1；Paper 排序采用最佳加权命中、来源多样性奖励与封顶的次级命中奖励，避免长论文凭大量弱 Chunk 命中支配排名。同分继续按最佳来源、`updated_at` 和 Paper ID 确定性排序。Paper 与 authors 仍批量读取，不存在逐结果 N+1。
+
+隔离规模门禁覆盖 100 Papers、1,000 Sections、5,000 Chunks、2,000 References；`EXPLAIN ANALYZE` 脚本位于 `backend/tests/search_explain.sql`。在该小型全内存夹具上 PostgreSQL 可合理选择亚毫秒 Seq Scan；关闭 Seq Scan 的索引资格检查确认 title trigram 以及 Chunk/Section/Reference GIN 谓词均产生 Bitmap Index Scan。
+
+Search 页面已适配 Paper 结果卡、来源徽标、snippet 和 Paper 级分页。可定位的 Section/Chunk/Reference/Figure/Table match 跳转到 `/reader/{paperId}?document_id={documentId}&page={pageStart}`。Reader 仅在当前 Paper scope 初始化时消费一次 URL page，优先级为 URL page → ReadingProgress → Page 1，后续翻页不受 URL 持续控制。
+
 ```bash
 # 读取指定 PDF 的已保存进度
 curl "http://localhost:8000/api/papers/<paper_id>/reading-progress?document_id=<document_id>"
@@ -861,7 +879,9 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S7-C | Reference Extraction | ✅ |
 | S7-D | Figure / Table Metadata | ✅ |
 | S7 | PDF Parser + Section + Chunk + Reference / Figure / Table Extraction | ✅ |
-| S8 | 全文搜索 |
+| S8-A | Unified Search Contract + Paper-level Aggregation | ✅ |
+| S8-B | Search Quality + PostgreSQL FTS + pg_trgm + Performance | ✅ |
+| S8 | 全文搜索 | ✅ |
 | S9 | Markdown + LaTeX 笔记 |
 | S10 | Embedding + RAG 基础 |
 | S11 | AI Summary + Q&A |

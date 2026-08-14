@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, UniqueConstraint, func
+from sqlalchemy import Computed, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.config import settings
@@ -20,6 +21,7 @@ class Chunk(Base):
     __tablename__ = "chunks"
     __table_args__ = (
         UniqueConstraint("document_id", "chunk_index", name="uq_chunks_document_order"),
+        Index("ix_chunks_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -37,6 +39,9 @@ class Chunk(Base):
     char_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     content: Mapped[str] = mapped_column(Text)
+    search_vector: Mapped[object] = mapped_column(
+        TSVECTOR, Computed("to_tsvector('simple', coalesce(content, ''))", persisted=True)
+    )
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Bounding box for PDF position recovery: [x0, y0, x1, y1]

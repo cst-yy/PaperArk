@@ -24,10 +24,23 @@ import { useReaderStore } from "@/stores/readerStore";
 
 export default function Reader() {
   const { paperId } = useParams<{ paperId: string }>();
+  return <ReaderContent key={paperId} />;
+}
+
+function ReaderContent() {
+  const { paperId } = useParams<{ paperId: string }>();
   const [searchParams] = useSearchParams();
+  const [initialLocation] = useState(() => {
+    const pageValue = Number(searchParams.get("page"));
+    return {
+      documentId: searchParams.get("document_id"),
+      page: Number.isInteger(pageValue) && pageValue > 0 ? pageValue : undefined,
+    };
+  });
   const navigate = useNavigate();
   const { data: paper, isLoading, isError, error, refetch } = usePaper(paperId);
-  const requestedDocumentId = searchParams.get("document_id");
+  const requestedDocumentId = initialLocation.documentId;
+  const requestedPage = initialLocation.page;
   const activeDocument = paper?.documents.find((document) => document.id === requestedDocumentId)
     ?? paper?.document
     ?? paper?.documents[0];
@@ -61,6 +74,7 @@ export default function Reader() {
     currentPage,
     totalPages,
     readingStatus: paper?.reading_status,
+    initialPage: requestedPage,
     setCurrentPage,
   });
 

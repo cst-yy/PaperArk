@@ -22,9 +22,10 @@ interface PDFViewerProps {
   onCreateTextAnnotation: (selection: SelectionContext, type: "highlight" | "underline" | "comment", color: "yellow" | "green" | "blue" | "red" | "purple") => void;
   onCreateAreaAnnotation: (rect: NormalizedRect) => void;
   onAnnotationClick: (annotation: Annotation) => void;
+  onTranslateSelection: (text: string) => void;
 }
 
-export function PDFViewer({ fileUrl, annotations, activeAnnotationId, areaMode, onDocumentLoad, onCreateTextAnnotation, onCreateAreaAnnotation, onAnnotationClick }: PDFViewerProps) {
+export function PDFViewer({ fileUrl, annotations, activeAnnotationId, areaMode, onDocumentLoad, onCreateTextAnnotation, onCreateAreaAnnotation, onAnnotationClick, onTranslateSelection }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -84,6 +85,6 @@ export function PDFViewer({ fileUrl, annotations, activeAnnotationId, areaMode, 
           {areaDraft && <div className="pointer-events-none absolute border-2 border-primary-500 bg-primary-400/15" style={{ left: `${areaDraft.x * 100}%`, top: `${areaDraft.y * 100}%`, width: `${areaDraft.width * 100}%`, height: `${areaDraft.height * 100}%` }} />}
         </div>
       </Document>}
-    {selection && <SelectionToolbar selection={selection} onCreate={(type, color) => { onCreateTextAnnotation(selection, type, color); setSelection(null); window.getSelection()?.removeAllRanges(); }} />}
+    {selection && <SelectionToolbar selection={selection} onCreate={(type, color) => { onCreateTextAnnotation(selection, type, color); setSelection(null); window.getSelection()?.removeAllRanges(); }} onTranslate={() => { onTranslateSelection(selection.text); setSelection(null); window.getSelection()?.removeAllRanges(); }} />}
   </div>;
 }

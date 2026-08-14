@@ -5,9 +5,10 @@ import type { AnnotationColor, SelectionContext } from "@/features/annotation/ty
 interface SelectionToolbarProps {
   selection: SelectionContext;
   onCreate: (type: "highlight" | "underline" | "comment", color: AnnotationColor) => void;
+  onTranslate: () => void;
 }
 
-export function SelectionToolbar({ selection, onCreate }: SelectionToolbarProps) {
+export function SelectionToolbar({ selection, onCreate, onTranslate }: SelectionToolbarProps) {
   return (
     <div
       className="fixed z-50 flex -translate-x-1/2 -translate-y-full items-center gap-1 rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
@@ -18,7 +19,7 @@ export function SelectionToolbar({ selection, onCreate }: SelectionToolbarProps)
       <ToolbarButton label="下划线" icon={PenLine} onClick={() => onCreate("underline", "red")} />
       <ToolbarButton label="评论" icon={MessageSquare} onClick={() => onCreate("comment", "yellow")} />
       <span className="mx-1 h-5 w-px bg-gray-200 dark:bg-slate-700" />
-      <ToolbarButton label="翻译（S11）" icon={Languages} disabled />
+      <ToolbarButton label="翻译" icon={Languages} onClick={onTranslate} />
       <ToolbarButton label="AI 解释（S11）" icon={Sparkles} disabled />
       <ToolbarButton label="加入笔记（S9）" icon={StickyNote} disabled />
     </div>

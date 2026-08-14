@@ -1,8 +1,4 @@
-"""Document repository — data access layer for documents.
-
-All queries are user-scoped via a JOIN to Paper.user_id.
-A user can never access another user's documents even if they know the UUID.
-"""
+"""User-scoped persistence helpers for Document parsing."""
 
 import uuid
 
@@ -16,10 +12,7 @@ class DocumentRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_by_id(
-        self, document_id: uuid.UUID, user_id: uuid.UUID
-    ) -> Document | None:
-        """Get a single document, scoped to user_id via Paper join."""
+    async def get_by_id(self, document_id: uuid.UUID, user_id: uuid.UUID) -> Document | None:
         stmt = (
             select(Document)
             .join(Paper, Document.paper_id == Paper.id)
@@ -28,10 +21,7 @@ class DocumentRepository:
         result = await self.db.execute(stmt)
         return result.scalars().first()
 
-    async def get_by_paper(
-        self, paper_id: uuid.UUID, user_id: uuid.UUID
-    ) -> Document | None:
-        """Get the primary document for a paper, scoped to user_id."""
+    async def get_by_paper(self, paper_id: uuid.UUID, user_id: uuid.UUID) -> Document | None:
         stmt = (
             select(Document)
             .join(Paper, Document.paper_id == Paper.id)
@@ -42,10 +32,7 @@ class DocumentRepository:
         result = await self.db.execute(stmt)
         return result.scalars().first()
 
-    async def list_by_paper(
-        self, paper_id: uuid.UUID, user_id: uuid.UUID
-    ) -> list[Document]:
-        """List every document for a paper, scoped to its owning user."""
+    async def list_by_paper(self, paper_id: uuid.UUID, user_id: uuid.UUID) -> list[Document]:
         stmt = (
             select(Document)
             .join(Paper, Document.paper_id == Paper.id)
@@ -56,7 +43,7 @@ class DocumentRepository:
         return list(result.scalars().all())
 
     async def create(self, **kwargs) -> Document:
-        doc = Document(**kwargs)
-        self.db.add(doc)
+        document = Document(**kwargs)
+        self.db.add(document)
         await self.db.flush()
-        return doc
+        return document

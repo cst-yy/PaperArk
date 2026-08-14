@@ -22,6 +22,7 @@ async def session() -> AsyncSession:
 
     async with engine.begin() as connection:
         await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
 

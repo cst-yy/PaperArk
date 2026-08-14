@@ -20,6 +20,7 @@ from fastapi import (
     Query,
     UploadFile,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_current_user_id, get_db
 from app.core.exceptions import (
@@ -29,6 +30,7 @@ from app.core.exceptions import (
     FolderNotFoundError,
     InvalidFileTypeError,
     InvalidFolderError,
+    InvalidNoteError,
     InvalidTagError,
     PaperNotFoundError,
     StorageError,
@@ -36,6 +38,7 @@ from app.core.exceptions import (
 )
 from app.schemas.keyword import KeywordReplacement
 from app.schemas.reading_progress import ReadingProgressResponse, ReadingProgressUpsert
+from app.schemas.note import NoteResponse
 from app.schemas.paper import (
     AuthorReplacement,
     FolderReplacement,
@@ -50,6 +53,7 @@ from app.schemas.paper import (
 )
 from app.services.paper_service import PaperMapper, PaperService, get_paper_service
 from app.services.reading_progress_service import ReadingProgressService
+from app.services.note_service import NoteService
 
 router = APIRouter()
 
@@ -144,6 +148,18 @@ async def list_papers(
 
 
 # ────────────────────────────── Detail ──────────────────────────────
+
+@router.get("/{paper_id}/notes", response_model=list[NoteResponse])
+async def list_paper_notes(
+    paper_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return await NoteService(db).list_notes(user_id, paper_id)
+    except InvalidNoteError as error:
+        raise HTTPException(status_code=404, detail=error.message)
+
 
 @router.get("/{paper_id}", response_model=PaperResponse)
 async def get_paper(

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -14,6 +14,10 @@ class Paper(Base):
             "reading_status IN ('unread', 'reading', 'finished', 'archived')",
             name="ck_papers_reading_status",
         ),
+        Index("ix_papers_title_trgm", "title", postgresql_using="gin", postgresql_ops={"title": "gin_trgm_ops"}),
+        Index("ix_papers_journal_trgm", "journal", postgresql_using="gin", postgresql_ops={"journal": "gin_trgm_ops"}),
+        Index("ix_papers_conference_trgm", "conference", postgresql_using="gin", postgresql_ops={"conference": "gin_trgm_ops"}),
+        Index("ix_papers_publisher_trgm", "publisher", postgresql_using="gin", postgresql_ops={"publisher": "gin_trgm_ops"}),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -87,4 +91,7 @@ class Paper(Base):
         back_populates="target_paper",
         foreign_keys="PaperRelation.target_paper_id",
         cascade="all, delete-orphan",
+    )
+    matched_references: Mapped[list["Reference"]] = relationship(
+        "Reference", back_populates="matched_paper", foreign_keys="Reference.matched_paper_id"
     )

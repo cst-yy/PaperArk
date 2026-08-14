@@ -58,3 +58,6 @@ class Annotation(Base):
 
     user: Mapped["User"] = relationship("User", back_populates="annotations")
     paper: Mapped["Paper"] = relationship("Paper", back_populates="annotations")
+    note_evidence: Mapped[list["NoteEvidence"]] = relationship(
+        "NoteEvidence", back_populates="annotation", passive_deletes=True
+    )

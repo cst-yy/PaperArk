@@ -119,3 +119,8 @@ export async function uploadPaper(
 export function getDocumentFileUrl(documentId: string): string {
   return `/api/documents/${documentId}/file`;
 }
+
+export async function parseDocument(documentId: string): Promise<import("./types").DocumentBrief> {
+  const response = await api.post<import("./types").DocumentBrief>(`/documents/${documentId}/parse`);
+  return response.data;
+}

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -19,6 +19,7 @@ class Tag(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "normalized_name", name="uq_tag_user_normalized_name"),
+        Index("ix_tags_name_trgm", "name", postgresql_using="gin", postgresql_ops={"name": "gin_trgm_ops"}),
     )
 
     user: Mapped["User"] = relationship("User", back_populates="tags")

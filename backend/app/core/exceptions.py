@@ -82,6 +82,14 @@ class DocumentFileNotFoundError(DomainError):
     """Raised when the document record exists but the physical file is missing."""
 
 
+class DocumentParseInProgressError(DomainError):
+    """Raised when a document is already being parsed."""
+
+
+class DocumentParseError(DomainError):
+    """Raised when PDF parsing fails without affecting the source file."""
+
+
 # ── Annotation ──
 
 class AnnotationNotFoundError(DomainError):
@@ -90,3 +98,27 @@ class AnnotationNotFoundError(DomainError):
 
 class InvalidAnnotationError(DomainError):
     """Raised when annotation anchors or ownership are invalid."""
+
+
+class NoteNotFoundError(DomainError):
+    """Raised when a note is missing or belongs to another user."""
+
+
+class InvalidNoteError(DomainError):
+    """Raised when a note aggregate violates paper ownership or type rules."""
+
+
+class SemanticRetrievalError(DomainError):
+    """Raised when an explicitly requested semantic provider is unavailable."""
+
+
+class RAGContextError(DomainError):
+    """Raised when a RAG context scope is invalid or inaccessible."""
+
+
+class GenerationProviderError(DomainError):
+    """Raised when grounded generation is unavailable or returns an invalid response."""
+
+
+class StructuredGenerationError(DomainError):
+    """Raised when deep-reading output cannot satisfy the strict draft contract."""

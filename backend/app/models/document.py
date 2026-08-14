@@ -47,12 +47,13 @@ class Document(Base):
     # Parse metadata (S7/S10 will populate these)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     parse_status: Mapped[str] = mapped_column(
-        String(20), default="pending"
-    )  # pending | parsing | parsed | failed
+        String(20), default="pending", server_default="pending", index=True
+    )  # pending | processing | ready | failed
     parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    parser_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -68,6 +69,12 @@ class Document(Base):
     )
     chunks: Mapped[list["Chunk"]] = relationship(
         "Chunk", back_populates="document", cascade="all, delete-orphan"
+    )
+    references: Mapped[list["Reference"]] = relationship(
+        "Reference", back_populates="document", cascade="all, delete-orphan"
+    )
+    elements: Mapped[list["DocumentElement"]] = relationship(
+        "DocumentElement", back_populates="document", cascade="all, delete-orphan"
     )
     reading_progress: Mapped[list["ReadingProgress"]] = relationship(
         "ReadingProgress", back_populates="document", cascade="all, delete-orphan"

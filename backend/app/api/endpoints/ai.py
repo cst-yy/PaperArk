@@ -1,90 +1,66 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import DEFAULT_USER_ID, get_db
-from app.models import Chunk, Document, Paper
-from pydantic import BaseModel
+from app.core.database import get_current_user_id, get_db
+from app.core.exceptions import (
+    GenerationProviderError,
+    PaperNotFoundError,
+    RAGContextError,
+    SemanticRetrievalError,
+    StructuredGenerationError,
+)
+from app.processors.generation import GenerationProvider, OpenAICompatibleGenerationProvider
+from app.schemas.ai import PaperQARequest, PaperQAResponse, TranslationRequest, TranslationResult
+from app.schemas.deep_reading import DeepReadingDraft, DeepReadingRequest
+from app.services.ai_service import AIService
+from app.services.deep_reading_service import DeepReadingService
 
 router = APIRouter()
 
 
-class SummaryRequest(BaseModel):
-    paper_id: uuid.UUID
+def get_generation_provider() -> GenerationProvider:
+    return OpenAICompatibleGenerationProvider()
 
 
-class SummaryResponse(BaseModel):
-    paper_id: uuid.UUID
-    tldr: str
-    key_points: list[str]
-    methods: str | None = None
-    contribution: str | None = None
-
-
-class QARequest(BaseModel):
-    paper_id: uuid.UUID
-    question: str
-
-
-class QAResponse(BaseModel):
-    paper_id: uuid.UUID
-    question: str
-    answer: str
-    sources: list[dict] = []
-
-
-@router.post("/summary", response_model=SummaryResponse)
-async def get_summary(data: SummaryRequest, db: AsyncSession = Depends(get_db)):
-    """Generate a paper summary (stub - integrate LLM in S11)."""
-    paper = await db.get(Paper, data.paper_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
-
-    # TODO: Replace with actual LLM call in Sprint 11
-    return SummaryResponse(
-        paper_id=paper.id,
-        tldr=f"[AI Summary placeholder] {paper.title[:100]}...",
-        key_points=["Point 1 - to be filled by LLM", "Point 2 - to be filled by LLM"],
-        methods=None,
-        contribution=None,
-    )
-
-
-@router.post("/qa", response_model=QAResponse)
-async def ask_question(data: QARequest, db: AsyncSession = Depends(get_db)):
-    """Answer a question about a paper using RAG (stub - integrate in S11)."""
-    paper = await db.get(Paper, data.paper_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
-
-    # TODO: Implement vector search + LLM in Sprint 11
-    # 1. Embed the question
-    # 2. Search chunks by similarity
-    # 3. Feed context to LLM
-    # 4. Return answer with source citations
-
-    return QAResponse(
-        paper_id=paper.id,
-        question=data.question,
-        answer="[AI Q&A placeholder - will be implemented in Sprint 11 with RAG pipeline]",
-        sources=[],
-    )
-
-
-@router.post("/concepts")
-async def extract_concepts(
-    data: SummaryRequest, db: AsyncSession = Depends(get_db)
+@router.post("/qa", response_model=PaperQAResponse)
+async def answer_paper_question(
+    request: PaperQARequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    provider: GenerationProvider = Depends(get_generation_provider),
 ):
-    """Extract key concepts and terms from a paper (stub)."""
-    paper = await db.get(Paper, data.paper_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
+    try:
+        return await AIService(db, provider).answer_paper_question(user_id, request)
+    except (PaperNotFoundError, RAGContextError) as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    except (GenerationProviderError, SemanticRetrievalError) as exc:
+        raise HTTPException(status_code=503, detail="AI service is temporarily unavailable") from exc
 
-    # TODO: Implement concept extraction in Sprint 11
-    return {
-        "paper_id": str(paper.id),
-        "concepts": [],
-        "message": "Concept extraction will be implemented in Sprint 11",
-    }
+
+@router.post("/translate", response_model=TranslationResult)
+async def translate_selection(
+    request: TranslationRequest,
+    db: AsyncSession = Depends(get_db),
+    provider: GenerationProvider = Depends(get_generation_provider),
+):
+    try:
+        return await AIService(db, provider).translate_selection(request)
+    except GenerationProviderError as exc:
+        raise HTTPException(status_code=503, detail="AI service is temporarily unavailable") from exc
+
+
+@router.post("/deep-reading", response_model=DeepReadingDraft)
+async def generate_deep_reading(
+    request: DeepReadingRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    provider: GenerationProvider = Depends(get_generation_provider),
+):
+    try:
+        return await DeepReadingService(db, provider).generate(user_id, request)
+    except RAGContextError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    except (GenerationProviderError, SemanticRetrievalError, StructuredGenerationError) as exc:
+        raise HTTPException(status_code=503, detail="AI structured analysis is temporarily unavailable") from exc

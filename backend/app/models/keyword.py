@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -13,6 +13,7 @@ class Keyword(Base):
     __tablename__ = "keywords"
     __table_args__ = (
         UniqueConstraint("user_id", "normalized_name", name="uq_keyword_user_normalized_name"),
+        Index("ix_keywords_display_name_trgm", "display_name", postgresql_using="gin", postgresql_ops={"display_name": "gin_trgm_ops"}),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

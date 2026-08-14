@@ -84,6 +84,9 @@ class PaperMapper:
                 file_size=document.file_size,
                 mime_type=document.mime_type,
                 parse_status=document.parse_status,
+                parse_error=document.parse_error,
+                parsed_at=document.parsed_at,
+                parser_version=document.parser_version,
             )
             for document in documents
         ]

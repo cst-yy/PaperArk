@@ -227,6 +227,17 @@ except Exception:
 
 上传服务在 `commit()` 成功前不会返回。任何创建、flush 或最终 commit 失败都会回滚数据库并清理刚写入的 PDF，避免孤儿文件。
 
+### S7-A：PDF Parser Pipeline & Parse State
+
+迁移 `d3f7a2e9c5b4_document_parser_lifecycle` 将 Document 解析状态统一为 `pending | processing | ready | failed`，并新增 `parser_version`、`ix_documents_parse_status` 与数据库 CHECK 约束。
+
+```text
+POST /api/documents/{document_id}/parse
+GET  /api/documents/{document_id}/parse-status
+```
+
+解析服务会先执行用户归属校验，再用条件更新阻止同一 Document 并发解析；PyMuPDF 使用 `page.get_text("text")` 提取页级文本、尺寸与扫描页 warning。S7-A 仅更新 Document 的页数、状态、错误、解析时间与 parser version：不会修改原 PDF、`Document.file_path`、Paper metadata、Section 或 Chunk。失败会保留源文件和任何未来派生数据，并可调用同一 endpoint 重试。上传完成后前端会异步发起解析，不阻塞上传响应；Reader 显示解析状态，并在待解析或失败时提供触发/重试入口。
+
 ---
 
 ## 数据库迁移与质量检查
@@ -657,6 +668,169 @@ reading_status    = unread / reading / finished / archived
 
 迁移 `a9d4e7b2c6f1_annotation_document_anchor_alignment` 以 fail-fast 方式收紧 Evidence Anchor 的数据库约束：先检查空 `document_id` 和错误的 Paper/Document 配对，只有数据完整时才将 `annotations.document_id` 对齐为 `NOT NULL`、`FOREIGN KEY ... ON DELETE CASCADE` 并创建 `ix_annotations_document_id`。不修改历史迁移，不会猜测回填或静默删除标注数据。
 
+### S7-A：PDF Parser Pipeline & Parse State
+
+迁移 `d3f7a2e9c5b4_document_parser_lifecycle` 将 Document 解析状态统一为 `pending | processing | ready | failed`，并新增 `parser_version`、`ix_documents_parse_status` 与数据库 CHECK 约束。
+
+```text
+POST /api/documents/{document_id}/parse
+GET  /api/documents/{document_id}/parse-status
+```
+
+解析服务会先执行用户归属校验，再用条件更新阻止同一 Document 并发解析；PyMuPDF 使用 `page.get_text("text")` 提取页级文本、尺寸与扫描页 warning。S7-A 仅更新 Document 的页数、状态、错误、解析时间与 parser version：不会修改原 PDF、`Document.file_path`、Paper metadata、Section 或 Chunk。失败会保留源文件和任何未来派生数据，并可调用同一 endpoint 重试。上传完成后前端会异步发起解析，不阻塞上传响应；Reader 显示解析状态，并在待解析或失败时提供触发/重试入口。
+
+### S7-B：Section + Section-aware Chunk
+
+迁移 `e4b8c6a1f9d3_structured_document_derivatives` 演进既有 `sections`/`chunks` 表，不创建 v2 表：Section 增加时间字段，Chunk 增加 `page_start/page_end/char_count`，并以 `(document_id, chunk_index)` 保证文档内顺序唯一。解析服务现在采用：
+
+```text
+PDF → ParsedDocument（含 text spans）
+   → SectionDetector（保守标题、层级、页码、Full Text fallback）
+   → SectionChunker（段落感知、章节边界、页码追踪）
+   → validate
+   → 原子替换旧 Section/Chunk
+```
+
+`GET /api/documents/{document_id}/sections` 返回扁平、稳定顺序且经过用户隔离的 Section 列表；Chunk 暂不公开 API。Reader 左侧提供“PDF 目录 / 解析结构”切换，可跳转到 Section 起始页。无文本扫描 PDF 不产生空 Chunk；解析失败或派生数据校验失败不会删除旧结构。S7-B 不处理 Reference、Figure/Table，也不修改 Paper metadata。
+
+### S7-C：Reference Extraction
+
+迁移 `f6c2a9e7b4d1_document_references` 增加 PDF 派生 `Reference`：它严格归属于 `Document`，不会自动创建 Library Paper。`document_id` 使用 `ON DELETE CASCADE`，可选的 `matched_paper_id` 使用 `ON DELETE SET NULL`；`UNIQUE(document_id, order_index)` 防止重解析累积。
+
+解析器只消费已识别的 `references` Section，不扫描 References 之后的 Appendix 或 checklist。分段支持编号、多行、跨页条目及无编号 author-year fallback；DOI/arXiv 优先规范化提取，title/authors/year/venue 均为 best-effort，无法可靠识别时保持空值。库内匹配仅按当前用户范围执行 DOI exact → arXiv exact → normalized title exact，不创建 `PaperRelation`。
+
+`DerivedDocumentSnapshot` 统一包含 Sections、Chunks、References；三者先在内存校验，再在同一事务中 child-first 替换。`GET /api/documents/{document_id}/references` 经过 Document → Paper → current user 归属校验，Reader 左侧“参考文献”入口支持跳转来源页和打开已匹配的库内论文。
+
+### S7-D：Figure / Table Metadata Extraction
+
+迁移 `a7d3f9c2e5b6_document_elements` 增加统一的 PDF 派生 `DocumentElement`，第一版仅允许 `figure | table`。每个元素保存文档级稳定顺序、页码、可选 Section、label、caption、raw_text、来源与置信度；`UNIQUE(document_id, order_index)` 防重复。bbox 使用 Annotation 一致的 normalized `x/y/width/height` 协议；无法可靠定位视觉区域时四项都为 `NULL`，不会生成整页框。
+
+ElementDetector 采用 caption-first 策略：识别 Figure/Fig./Table/图/表，合并邻近的多行 caption，并以 PDF image/vector 几何信息作为 Figure 向上、Table 向下的可选 bbox 证据。章节编号与新 caption 会终止合并，避免正文标题污染 caption。它不执行 OCR、AI 解释、表格单元格还原、图片裁剪，也不自动创建用户 Annotation。
+
+Elements 纳入同一 `DerivedDocumentSnapshot`，替换顺序为 Elements → References → Chunks → Sections，再插入新快照；任一检测或校验异常都会保留旧快照。`GET /api/documents/{document_id}/elements?element_type=figure|table` 经过用户隔离，Reader “图表”入口按 Figures/Tables 展示并跳转页码。
+
+### S8-A：Unified Search Contract + Paper-level Aggregation
+
+`GET /api/search?q=...&page=1&page_size=20` 现在返回稳定的 Paper-level contract：一篇 Paper 永远只对应一个搜索结果，`total` 为命中 Paper 数，分页在 hit 聚合之后执行。内部统一使用 `SearchHit`，来源固定为 title/abstract/author/tag/keyword/doi/arxiv/journal/conference/publisher/section/chunk/reference/figure/table。
+
+搜索由 Metadata、Section、Chunk、Reference、Element 五类 provider 分别产生 hit，再按 `paper_id` 聚合。首版权重只用于稳定排序，每篇 Paper 最多返回 5 条按来源权重和页码排序、经简单文本 fingerprint 去重的 matches，同时通过 `match_count` 保留完整命中数。所有派生 provider 均经 Document → Paper 的 user scope 隔离；本阶段只使用 PostgreSQL `ILIKE`，未引入 FTS、`pg_trgm`、embedding、semantic search、RRF、reranker、query expansion 或 AI search。
+
+### S8-B：Search Quality, Query Capability & Performance
+
+S8-A 的 Paper-level API contract 与前端 DTO 保持不变。查询现在统一进行空白折叠、case normalization、DOI/arXiv 前缀清理与识别；少于两个字符的普通查询直接拒绝。DOI/arXiv 使用 Paper/Reference 精确 shortcut，避免无意义全文扫描。
+
+短元数据（论文标题、作者、Tag、Keyword、期刊、会议、出版社）使用 `pg_trgm` 支持 exact、prefix 与 fuzzy 命中；DOI/arXiv 不依赖 trigram。Chunk、Section、Reference 与 Figure/Table caption 使用 `simple` dictionary 的 generated `tsvector`、GIN 和 `websearch_to_tsquery`，多词查询采用 AND-like websearch 语义。后端 snippet 始终为最多约 240 字符的纯文本上下文，不包含 HTML。
+
+Provider 将 exact/prefix/fuzzy/fulltext 分数归一化到 0–1；Paper 排序采用最佳加权命中、来源多样性奖励与封顶的次级命中奖励，避免长论文凭大量弱 Chunk 命中支配排名。同分继续按最佳来源、`updated_at` 和 Paper ID 确定性排序。Paper 与 authors 仍批量读取，不存在逐结果 N+1。
+
+隔离规模门禁覆盖 100 Papers、1,000 Sections、5,000 Chunks、2,000 References；`EXPLAIN ANALYZE` 脚本位于 `backend/tests/search_explain.sql`。在该小型全内存夹具上 PostgreSQL 可合理选择亚毫秒 Seq Scan；关闭 Seq Scan 的索引资格检查确认 title trigram 以及 Chunk/Section/Reference GIN 谓词均产生 Bitmap Index Scan。
+
+### S9-A：Markdown Note Aggregate
+
+旧 `Note` 表已原位演进：正文唯一事实来源为 `content_markdown`，`paper_id` 可空，`note_type` 限定为 `general | paper | research`。所有 CRUD、详情与 Paper 范围查询均按当前 `user_id` 隔离；关联 Paper 时必须验证所有权。`PUT /api/notes/{id}` 原子保存完整 Note aggregate，同时保留 PATCH 供简单字段更新。
+
+Notes 前端已移除 mock 数据，支持 `/notes`、`/notes/{noteId}` 和 `/papers/{paperId}/notes`。编辑器使用 Markdown source + 安全预览，支持 GFM、行内/块级 KaTeX，默认不执行原始 HTML；内容在停止输入 1 秒后自动保存，并以本地 revision 防止保存途中继续输入导致新内容被旧响应覆盖。S9-A 不包含 Evidence Linking、Structured Research Note 或 Note Search，这些分别留给 S9-B/C/D。
+
+### S9-B：Evidence Linking
+
+新增独立 `NoteEvidence` 关系表，将用户 Annotation 作为唯一 Evidence Anchor。每条关系保存稳定 `order_index` 和首次绑定时的 `quote_snapshot`；Note 与 Annotation 任一方删除都只级联关系，不会删除另一端内容。Paper-scoped Note 只能引用同一 Paper 的 Annotation，General Note 可以引用当前用户不同 Paper 的 Annotation，foreign user Annotation 永远拒绝。
+
+主契约 `PUT /api/notes/{note_id}/evidence` 在任何写入前批量验证全部 ID，按照请求顺序完整替换；重复 ID、foreign Annotation 或跨 Paper Annotation 都会整体失败并保留原集合。Reader 快捷操作使用共享验证 primitive 的幂等 POST/DELETE，`POST /api/notes` 也可携带 `annotation_ids`，实现新建 Paper Note 与首条证据的单事务写入。Note detail 通过 eager-load 一次返回 Evidence 与 Annotation brief，不产生逐 Annotation N+1。
+
+Reader 的已保存 Annotation 卡片新增“添加到笔记”；可选择当前 Paper Note，或新建论文笔记并立即绑定。Note 页面新增 Evidence Panel，可查看类型、页码与快照、移除关系，并复用 `/reader/{paperId}?document_id=...&page=...` 跳回原文。Markdown 自动保存与 Evidence API 相互独立，不会覆盖关系操作。
+
+### S9-C：Structured Research Notes
+
+`research` 类型 Note 现在拥有独立的结构化聚合：`ResearchNoteProfile` 保存研究问题、方法、结论、局限与未来工作，`ResearchContribution` 和 `ResearchExperiment` 分别保存贡献与实验卡片。实验可通过 `ExperimentContribution` 关联其支撑的贡献；贡献和实验只能通过 `ContributionEvidence` / `ExperimentEvidence` 引用当前 Note 已有的 `NoteEvidence`，不会复制或重新定义 Evidence Anchor。
+
+`GET /api/notes/{note_id}/research-profile` 返回当前结构化聚合（未创建时为 `null`），`PUT /api/notes/{note_id}/research-profile` 对 Profile、Contribution、Experiment 及其全部关系执行单事务完整替换。服务会在写入前批量校验 Note 类型、Paper 归属、client ID 引用和 Evidence 归属，任一无效引用都会整体回滚；删除结构化卡片不会删除 NoteEvidence、Annotation 或 Markdown 正文。
+
+Notes 页面为研究笔记提供“正文 / 结构化”双视图。结构化编辑器支持 Profile 字段、贡献与实验卡片、Evidence 选择以及实验到贡献的关联，并沿用 revision-aware 自动保存。Markdown aggregate 与 Research Profile 使用独立 API 和缓存键，保存任一视图都不会覆盖另一视图。
+
+### S9-D：Note Search + Reader Integration
+
+Global Search 的稳定契约已扩展为 `SearchPaperResult | SearchNoteResult`，两类结果分别携带显式 `entity_type`，在 Paper/Note 聚合完成后统一按实体评分、排序和分页。Paper 搜索结果保持原有结构；General、Paper 与 Research Note 始终作为独立 Note result 返回，不会伪装或并入 Paper。Library 的 `GET /api/papers?q=` 契约未改变。
+
+Note 标题和 Markdown 正文使用 `simple` 配置的 generated `tsvector` 与 GIN 索引，结果摘要通过轻量 `normalize_note_search_text()` 去除常见 Markdown/LaTeX 标记。结构化检索覆盖 Profile、Contribution 与 Experiment（包括 datasets、baselines 和 metrics）；来源会细分为研究问题、方法、创新点、实验、结论和我的思考。`NoteEvidence.quote_snapshot` 不作为 Note 正文检索源，避免与 Paper 原文重复命中。所有 provider 都显式通过 `Note.user_id` 隔离。
+
+Search UI 现在区分“论文 / 笔记”实体；结构化命中打开 `/notes/{id}?view=structured`，普通命中打开 Note 正文。Reader 右侧新增当前 Paper 的关联笔记列表，因此双向链路为 `Reader → Note → Evidence → Reader`，但 Reader 不嵌入完整笔记编辑器。
+
+### S10-A：Embedding Infrastructure
+
+Chunk 与 Note 现在拥有独立、可重建的 embedding 生命周期字段：固定维度向量、`embedding_model`、`embedding_dimension`、基于实际 provider 输入计算的 `embedding_content_hash`，以及 `pending | processing | ready | failed` 状态和错误信息。Chunk 的输入为 Section title + Chunk content；Note 的输入为 title + 清理常见 Markdown/LaTeX 标记后的正文，明确不包含 Evidence snapshot 或 Structured Research Profile。
+
+`EmbeddingProvider` 协议将业务服务与供应商 SDK 解耦，首个实现为 OpenAI-compatible HTTP provider。`EmbeddingLifecycleService` 按配置批量处理当前用户的 stale Chunk/Note，内容、模型、维度与 hash 均未变化时直接跳过；provider 失败只把当前批次标记为 failed，不回滚或覆盖主数据。新 Chunk 默认 pending，Note 标题或 Markdown 变化后也会在原事务内标为 pending；reparse 删除旧 Chunk 时其内嵌向量天然一并删除。
+
+管理接口为 `POST /api/embeddings/rebuild` 与 `GET /api/embeddings/status`。不会在应用启动时扫描或调用 embedding 服务，也没有把 API key 写入数据库或 Workspace backup。S10-A 不改变 `/api/search`，Semantic Search、Hybrid/RRF 和 RAG Context 分别留给 S10-B/C/D。
+
+### S10-B：Semantic Retrieval
+
+`GET /api/search` 现在支持 `mode=lexical|semantic`，默认 lexical，因此 S8/S9 的调用和结果契约保持不变。Semantic mode 仅调用 Query Embedding、Chunk vector provider 与 Note vector provider，不调用 lexical providers，也不会静默降级。Query vector 不持久化，并且必须与当前 Workspace 的 model/dimension 完全一致；provider 不可用或维度错误时返回明确的 503。
+
+Chunk 与 Note 的余弦距离计算、过滤、排序和 top-K 全部在 PostgreSQL 中完成。检索仅接受 `ready + current model + current dimension + non-null vector`，并显式通过 Paper/Note 的 `user_id` 隔离。每类 provider 默认取 50 个候选并应用可配置的低阈值；Chunk 仍聚合为 Paper、Note 仍聚合为 Note，最终继续按实体分页。内部 hit 使用 `retrieval_method=semantic`，但公开 source 仍为 `chunk` 或 `note_content`。
+
+Chunk 与 Note 均新增 cosine HNSW partial index。索引资格已通过 `enable_seqscan=off` 的 EXPLAIN 验证，两类查询都产生对应 HNSW Index Scan。Search 页面新增 URL 驱动的“关键词 / 语义”切换，`mode=semantic` 可刷新、复制和前进后退恢复；结果卡和 Reader/Note 导航保持原契约。S10-B 不包含 Hybrid、RRF、reranker 或 RAG context。
+
+### S10-C：Hybrid Retrieval + RRF
+
+`mode=hybrid` 顺序执行既有 lexical 与 semantic 两条独立候选链；两侧各自完成 Paper/Note 实体聚合后，才以 `(entity_type, UUID)` 为稳定 key 做实体级 Reciprocal Rank Fusion。第一版使用等权标准公式 `1 / (60 + rank)`，不直接相加 lexical raw score 与 cosine similarity。候选池会随目标页深度增长并限制为最多 200 个实体，最终仍按融合后的 Paper/Note 统一列表分页。
+
+融合采用 union 而非 intersection：只被一条链召回的实体不会丢失，同时出现在两条链中的实体获得双路排名贡献。两侧 matches 会合并并按 source/document/section/page/text 稳定去重，保留内容来源与 Reader 定位信息。纯函数 `rrf_fuse()` 记录 lexical/semantic rank provenance，并使用明确的 rank、entity type 与 UUID tie-break，重复查询顺序稳定。
+
+响应可选返回 `retrieval` metadata。Semantic mode 的 provider failure 仍为 503；Hybrid mode 遇到相同故障则显式降级为 lexical，并返回 `semantic_available=false`，前端显示轻量警告。当前模型没有 ready vector 时返回 `semantic_index_ready=false`，与 provider 故障区分。Search UI 支持“关键词 / 语义 / 混合”三种 URL 模式，但默认仍为无外部依赖的 lexical。S10-C 不包含 RAG context assembly。
+
+### S10-D：RAG Context Assembly
+
+新增 `POST /api/rag/context`，将 Chunk/Note 粒度的 lexical、semantic 或 hybrid 候选组装为可追溯上下文包，不调用 LLM、不生成回答或 Prompt。RAG DTO 与 Search Card 完全解耦：`RAGCandidate` 保留 source-level rank，最终 `RAGSource` 明确区分 `paper_chunk` 与 `note`，并携带 Paper、Document、Section、页码、Note 及稳定 `source_key` provenance。
+
+RAG retrieval 直接复用 PostgreSQL FTS、pgvector 与 RRF 公式，但融合发生在 `chunk:{id}` / `note:{id}` source 层而非 Search 的 Paper/Note entity 层。可选 `paper_id` 会在数据库查询阶段限制 Chunk 与 Paper Note，同时排除 General Note、其他 Paper 和其他用户数据。Semantic failure 规则与 Search 一致：semantic 模式返回 503，hybrid 显式降级 lexical。
+
+纯 Python `RAGContextAssembler` 负责稳定去重、同 Document/Section 的保守相邻 Chunk window 合并、禁止跨 Section 合并、Library-wide Paper 多样性、最多 2 个 Note、单来源 cap、总 token budget 和确定性 formatter。Token 为近似估算，并包含 provenance header 开销；截断会同时标记 source 与整个 context。格式明确使用 `[SOURCE n | PAPER]` / `[SOURCE n | NOTE]`，防止后续模型混淆论文证据和用户解释。
+
+### S11-A：AI Provider + Grounded Answer Contract
+
+新增与业务 Service 解耦的 `GenerationProvider` 协议和 OpenAI-compatible HTTP 实现。生成配置独立使用 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL`、`AI_MAX_OUTPUT_TOKENS` 与 `AI_TEMPERATURE`，不会复用或持久化 Embedding 密钥；测试全部使用 fake provider，不访问真实模型 API。
+
+`AIService` 现在严格执行 `User Query → RAGContext → GroundedPromptBuilder → GenerationProvider → CitationValidator → AIAnswer`。模型上下文只暴露稳定的 `[S1]` 编号并明确区分 PAPER 原文与 NOTE 用户解释，不暴露 `source_key`、Document ID 或页码等可信元数据。生成后端只解析上下文中存在的编号，删除非法引用，并从原始 `RAGSource` 回填 citation provenance；出现伪造编号、缺少有效引用或模型声明证据不足时，结果不会被标记为 grounded。
+
+当前 S11-A 只建立单轮 grounded generation 内核，不开放 Paper Q&A、翻译、聊天历史、streaming、Agent、外部搜索或自动写入 Research Note。空 RAG context 会直接返回 `insufficient_evidence=true`，不会调用模型；Provider 未配置、网络失败或响应格式错误会抛出明确的 `GenerationProviderError`。
+
+### S11-B：Paper Q&A + Selection Translation
+
+`POST /api/ai/qa` 接收 `paper_id`、问题和 retrieval 参数。`AIService.answer_paper_question()` 先按当前用户验证 Paper ownership，再在服务内部强制构造带 `paper_id` 的 RAG request；因此候选只包含该论文 Chunk 及其 Paper/Research Note Markdown，不包含 General Note、其他论文或其他用户数据。响应复用 S11-A `AIAnswer/AICitation`，并增加 Paper/Query identity；citation 按回答中首次出现顺序去重，可信 label、标题、Document/Note、Section 与页码全部由后端 provenance 回填。`grounded=true` 仅表示回答含合法引用、没有非法引用且未声明证据不足，并不代表逐句 NLI 验证。
+
+Reader 右栏现为“批注 / 笔记 / AI”。AI tab 提供 single-turn Paper Q&A、安全 Markdown/GFM/KaTeX 渲染与 citation chip/card；不启用 raw HTML，不保存 Conversation/Message。Paper citation 跳回可信 Document/Page，Note citation 打开对应 Note。相同 Paper 内跳页直接更新 Reader state，不依赖模型正文中的页码描述。
+
+`POST /api/ai/translate` 是独立的 selection translation contract，只接收 1–8000 字符文本和 `zh-CN | en` 目标语言，不调用 RAG 或 GroundedPromptBuilder。翻译 Prompt 要求忠实保留 LaTeX、数学符号、模型/数据集名、引用编号和缩写，并将输入视为数据而非指令。Reader 选区工具栏的“翻译”会打开 AI tab 显示临时结果；不会自动创建 Annotation、写 Note 或持久化翻译。两个接口当前均为完整 JSON 响应，不包含 streaming 或聊天历史；Provider 故障对外统一为不暴露密钥、URL 或 upstream body 的 503。
+
+```bash
+curl -X POST http://localhost:8000/api/ai/qa \
+  -H "Content-Type: application/json" \
+  -d '{"paper_id":"<uuid>","query":"这篇论文解决了什么问题？","retrieval_mode":"hybrid","max_sources":8,"token_budget":6000}'
+
+curl -X POST http://localhost:8000/api/ai/translate \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Federated learning...","target_language":"zh-CN"}'
+```
+
+### S11-C：Deep Reading Structured Analysis
+
+新增 `POST /api/ai/deep-reading`，返回与 S9-C 数据语义对齐但不持久化的 `DeepReadingDraft`。Draft 覆盖 background、prior-work limitations、research problem、method、results、conclusion、limitations、future work、Contributions 与 Experiments；`my_thoughts` 明确保留为用户判断，不属于 AI 输出。为补齐实际 S9-C aggregate 与 Draft 的语义差异，迁移 `d8f1a6c3e9b2` 在既有 `ResearchNoteProfile` 上增加 `future_work`，并同步保存、读取、编辑与结构化搜索，不创建第二套研究笔记表。
+
+`DeepReadingRetrievalService` 使用后端固定的 8 类 research intents 覆盖背景/问题、方法、创新、实验、结果、局限/未来工作与结论。每个 intent 均为当前用户、当前 Paper scope；union 后只保留 Paper Chunk，明确排除 Paper/Research/General Note。候选按 intent round-robin、source key 去重并施加 Section cap，最终使用最多 20 个来源和 12000 estimated-token budget，避免单一 Section 吞掉完整上下文。
+
+结构生成只接受严格 JSON。`DeepReadingPayload` 使用 Pydantic forbidden-extra 校验，重复 Contribution/Experiment client ID 或 Experiment 指向未知 Contribution 会使整个 Draft 失败；无效 JSON 最多执行一次“不新增内容”的 constrained repair。`StructuredEvidenceValidator` 对每个字段和卡片独立验证 `S#`，去重合法引用、删除非法引用并重新计算 grounded/insufficient；完全空的 Contribution/Experiment 会被丢弃。模型不能输出数据库 ID，可信 AI Source metadata 仍由当前 `RAGSource` 回填。
+
+Reader AI tab 可生成并审阅临时 Deep Reading Draft，按字段、创新点和实验展示 grounded 状态与可跳转 AI Source。生成本身不创建 Note、不修改 Research Profile、不创建 Annotation/NoteEvidence。用户点击“确认并应用”后，前端才调用既有 S9-C Note/Profile API：可显式新建或选择 Research Note，默认只填空标量、只应用 grounded 项并 append 卡片；覆盖已有标量或 replace-all 卡片必须明确选择。Apply 只写结构文本，AI Source 保持 provenance-only，`evidence_ids=[]`，`my_thoughts` 永远保留。
+
+```bash
+curl -X POST http://localhost:8000/api/ai/deep-reading \
+  -H "Content-Type: application/json" \
+  -d '{"paper_id":"<uuid>","retrieval_mode":"hybrid"}'
+```
+
+Search 页面已适配 Paper 结果卡、来源徽标、snippet 和 Paper 级分页。可定位的 Section/Chunk/Reference/Figure/Table match 跳转到 `/reader/{paperId}?document_id={documentId}&page={pageStart}`。Reader 仅在当前 Paper scope 初始化时消费一次 URL page，优先级为 URL page → ReadingProgress → Page 1，后续翻页不受 URL 持续控制。
+
 ```bash
 # 读取指定 PDF 的已保存进度
 curl "http://localhost:8000/api/papers/<paper_id>/reading-progress?document_id=<document_id>"
@@ -738,10 +912,35 @@ curl -X PUT "http://localhost:8000/api/papers/<paper_id>/reading-progress" \
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://paper:paper123@localhost:5432/paper_workspace` | PostgreSQL 连接串 |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis 连接串 |
+| `EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible embedding API 根地址 |
+| `EMBEDDING_API_KEY` | 空 | Embedding secret，仅从环境读取 |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | 当前 Workspace embedding 模型 |
+| `EMBEDDING_DIMENSION` | `384` | 固定向量维度；变更需要迁移 |
+| `EMBEDDING_BATCH_SIZE` | `32` | 每次 provider 请求的最大文本数 |
+| `SEMANTIC_CANDIDATE_K` | `50` | 每个 semantic provider 的数据库候选数 |
+| `SEMANTIC_MIN_SIMILARITY` | `0.30` | Semantic 初始余弦相似度下限 |
+| `HYBRID_RRF_K` | `60` | Reciprocal Rank Fusion 的稳定常数 |
+| `HYBRID_CANDIDATE_ENTITIES` | `50` | Hybrid 每条候选链的最小实体池 |
+| `HYBRID_MAX_CANDIDATE_ENTITIES` | `200` | Hybrid 深分页候选池上限 |
+| `RAG_CANDIDATE_K` | `40` | 每条 RAG retrieval 链的 source 候选数 |
+| `RAG_DEFAULT_MAX_SOURCES` | `8` | 默认上下文来源上限 |
+| `RAG_DEFAULT_TOKEN_BUDGET` | `6000` | 默认近似 token 预算 |
+| `RAG_MAX_TOKEN_BUDGET` | `12000` | API 允许的最大上下文预算 |
+| `RAG_MAX_CHUNK_SOURCE_TOKENS` | `1200` | 单个 Chunk/window 上限 |
+| `RAG_MAX_NOTE_SOURCE_TOKENS` | `1000` | 单个 Note 上限 |
+| `RAG_MAX_NOTE_SOURCES` | `2` | 默认 Note 来源数量上限 |
 | `STORAGE_DIR` | `./storage` | 文件存储目录 |
 | `MAX_UPLOAD_SIZE_MB` | `100` | PDF 上传最大大小 (MB) |
 | `SECRET_KEY` | `change-this-in-production` | JWT 密钥 |
-| `OPENAI_API_KEY` | (空) | AI / Embedding 用 |
+| `AI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible Generation API 地址 |
+| `AI_API_KEY` | (空) | Generation API 密钥，不写入数据库或备份 |
+| `AI_MODEL` | `gpt-4o-mini` | Generation 模型名 |
+| `AI_MAX_OUTPUT_TOKENS` | `1200` | 单次 grounded generation 最大输出 token |
+| `AI_TEMPERATURE` | `0.1` | grounded generation 温度 |
+| `DEEP_READING_CONTEXT_BUDGET` | `12000` | Deep Reading 上下文 estimated-token 预算 |
+| `DEEP_READING_MAX_SOURCES` | `20` | Deep Reading 最多 Paper Chunk 来源数 |
+| `DEEP_READING_SECTION_SOURCE_CAP` | `4` | 单个 Section 的候选来源上限 |
+| `DEEP_READING_MAX_OUTPUT_TOKENS` | `4000` | 结构化 Draft 最大输出 token |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | 向量模型 |
 | `CHUNK_SIZE` | `512` | PDF 分块大小 |
 | `CHUNK_OVERLAP` | `64` | 分块重叠 |
@@ -804,11 +1003,30 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S6-B | Recent Reading + Continue Reading | ✅ |
 | S6-C | Reading Status（unread / reading / finished / archived） | ✅ |
 | S6 | Reading Workflow | ✅ |
-| S7 | PDF Parser + Section + Chunk |
-| S8 | 全文搜索 |
-| S9 | Markdown + LaTeX 笔记 |
-| S10 | Embedding + RAG 基础 |
-| S11 | AI Summary + Q&A |
+| S7-A | PDF Parser Pipeline + Parse State | ✅ |
+| S7-B | Section + Paragraph-aware Chunk + Atomic Replacement | ✅ |
+| S7-C | Reference Extraction | ✅ |
+| S7-D | Figure / Table Metadata | ✅ |
+| S7 | PDF Parser + Section + Chunk + Reference / Figure / Table Extraction | ✅ |
+| S8-A | Unified Search Contract + Paper-level Aggregation | ✅ |
+| S8-B | Search Quality + PostgreSQL FTS + pg_trgm + Performance | ✅ |
+| S8 | 全文搜索 | ✅ |
+| S9-A | User-scoped Note Aggregate + Markdown/LaTeX Editor | ✅ |
+| S9-B | Annotation → NoteEvidence → Note | ✅ |
+| S9-C | Structured Research Notes | ✅ |
+| S9 Core | Markdown + Evidence-backed Structured Research Notes | ✅ |
+| S9-D | Note Search + Reader Integration | ✅ |
+| S9 | Markdown + Evidence-backed Structured Research Notes | ✅ |
+| S10-A | Versioned Chunk/Note Embedding Infrastructure | ✅ |
+| S10-B | Semantic Retrieval | ✅ |
+| S10-C | Hybrid Retrieval + RRF | ✅ |
+| S10-D | RAG Context Assembly | ✅ |
+| S10 | Semantic / Hybrid Retrieval + RAG Base | ✅ |
+| S11-A | AI Provider + Grounded Answer Contract | ✅ |
+| S11-B | Paper Q&A + Selection Translation | ✅ |
+| S11-C | Deep Reading Structured Analysis + Explicit Apply | ✅ |
+| S11-D | AI Result Provenance + Apply Workflow Hardening | 下一步 |
+| S11 | AI Deep Reading | 进行中 |
 | S12 | 论文关系 + 知识图谱 |
 
 ---

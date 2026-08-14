@@ -3,15 +3,24 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import { translateSelection } from "@/features/ai/api";
+import type { AICitation, TargetLanguage, TranslationResult } from "@/features/ai/types";
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from "@/features/annotation/hooks";
 import type { Annotation, AnnotationColor, NormalizedRect, SelectionContext, UpdateAnnotationInput } from "@/features/annotation/types";
 import { getDocumentFileUrl } from "@/features/paper/api";
 import { EditPaperDialog } from "@/features/paper/components/EditPaperDialog";
-import { useDeletePaper, usePaper, useSetPaperReadingStatus } from "@/features/paper/hooks";
+import { useDeletePaper, usePaper, useParseDocument, useSetPaperReadingStatus } from "@/features/paper/hooks";
 import { useReadingProgressSync } from "@/features/reading/useReadingProgressSync";
+import { AddAnnotationToNoteDialog } from "@/features/notes/AddAnnotationToNoteDialog";
 import { OutlinePanel } from "@/features/reader/components/OutlinePanel";
+import { ParsedSectionPanel } from "@/features/reader/components/ParsedSectionPanel";
+import { ParsedReferencePanel } from "@/features/reader/components/ParsedReferencePanel";
+import { ParsedElementPanel } from "@/features/reader/components/ParsedElementPanel";
+import { useParsedElements } from "@/features/reader/parsedElements";
+import { useParsedReferences } from "@/features/reader/parsedReferences";
+import { useParsedSections } from "@/features/reader/parsedSections";
 import { PDFViewer } from "@/features/reader/components/PDFViewer";
-import { ReaderSidebar } from "@/features/reader/components/ReaderSidebar";
+import { ReaderSidebar, type ReaderSideTab } from "@/features/reader/components/ReaderSidebar";
 import { ReaderToolbar } from "@/features/reader/components/ReaderToolbar";
 import { usePdfOutline } from "@/features/reader/hooks/usePdfOutline";
 import { useReaderStore } from "@/stores/readerStore";
@@ -19,9 +28,23 @@ import { useReaderStore } from "@/stores/readerStore";
 export default function Reader() {
   const { paperId } = useParams<{ paperId: string }>();
   const [searchParams] = useSearchParams();
+  return <ReaderContent key={`${paperId}:${searchParams.get("document_id") ?? ""}:${searchParams.get("page") ?? ""}`} />;
+}
+
+function ReaderContent() {
+  const { paperId } = useParams<{ paperId: string }>();
+  const [searchParams] = useSearchParams();
+  const [initialLocation] = useState(() => {
+    const pageValue = Number(searchParams.get("page"));
+    return {
+      documentId: searchParams.get("document_id"),
+      page: Number.isInteger(pageValue) && pageValue > 0 ? pageValue : undefined,
+    };
+  });
   const navigate = useNavigate();
   const { data: paper, isLoading, isError, error, refetch } = usePaper(paperId);
-  const requestedDocumentId = searchParams.get("document_id");
+  const requestedDocumentId = initialLocation.documentId;
+  const requestedPage = initialLocation.page;
   const activeDocument = paper?.documents.find((document) => document.id === requestedDocumentId)
     ?? paper?.document
     ?? paper?.documents[0];
@@ -34,21 +57,31 @@ export default function Reader() {
   const [activeAnnotation, setActiveAnnotation] = useState<{ paperId: string; id: string } | null>(null);
   const [areaModeState, setAreaModeState] = useState<{ paperId: string; enabled: boolean } | null>(null);
   const [editingPaper, setEditingPaper] = useState(false);
+  const [evidenceAnnotation, setEvidenceAnnotation] = useState<Annotation | null>(null);
+  const [outlineMode, setOutlineMode] = useState<"native" | "parsed" | "references" | "elements">("native");
+  const [sideTab, setSideTab] = useState<ReaderSideTab>("annotations");
+  const [translationState, setTranslationState] = useState<{ text: string | null; targetLanguage: TargetLanguage; result: TranslationResult | null; pending: boolean; error: string | null }>({ text: null, targetLanguage: "zh-CN", result: null, pending: false, error: null });
   const activePdf = loadedPdf && loadedPdf.paperId === paperId && loadedPdf.documentId === documentId ? loadedPdf.pdf : null;
   const activeAnnotationId = activeAnnotation && activeAnnotation.paperId === paperId ? activeAnnotation.id : null;
   const areaMode = areaModeState !== null && areaModeState.paperId === paperId && areaModeState.enabled;
   const { outline, isLoading: isOutlineLoading } = usePdfOutline(activePdf);
+  const { data: parsedSections = [], isLoading: parsedSectionsLoading } = useParsedSections(documentId);
+  const { data: parsedReferences = [], isLoading: parsedReferencesLoading } = useParsedReferences(documentId);
+  const { data: parsedElements = [], isLoading: parsedElementsLoading } = useParsedElements(documentId);
   const { data: annotations = [], isLoading: annotationsLoading } = useAnnotations(paperId, documentId);
   const createAnnotation = useCreateAnnotation(paperId ?? "");
   const updateAnnotation = useUpdateAnnotation(paperId ?? "");
   const deleteAnnotation = useDeleteAnnotation(paperId ?? "");
   const deletePaper = useDeletePaper();
   const setReadingStatus = useSetPaperReadingStatus();
+  const parseDocument = useParseDocument();
   const progressSync = useReadingProgressSync({
     paperId,
     documentId,
     currentPage,
     totalPages,
+    readingStatus: paper?.reading_status,
+    initialPage: requestedPage,
     setCurrentPage,
   });
 
@@ -99,6 +132,37 @@ export default function Reader() {
     window.setTimeout(() => setActiveAnnotation((current) => current?.id === annotation.id ? null : current), 1100);
   };
   const updateAnnotationComment = (annotationId: string, input: UpdateAnnotationInput) => updateAnnotation.mutate({ annotationId, input });
+  const runTranslation = async (text: string, targetLanguage: TargetLanguage) => {
+    setSideTab("ai");
+    setTranslationState({ text, targetLanguage, result: null, pending: true, error: null });
+    try {
+      const result = await translateSelection({ text, targetLanguage });
+      setTranslationState((current) => current.text === text ? { ...current, result, pending: false } : current);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "AI 服务暂时不可用，请稍后重试。";
+      setTranslationState((current) => current.text === text ? { ...current, error: message, pending: false } : current);
+    }
+  };
+  const handleTranslateSelection = (text: string) => {
+    const targetLanguage: TargetLanguage = /[\u4e00-\u9fff]/.test(text) ? "en" : "zh-CN";
+    void runTranslation(text, targetLanguage);
+  };
+  const openCitation = (citation: AICitation) => {
+    if (citation.source_type === "note" && citation.note_id) {
+      navigate(`/notes/${citation.note_id}`);
+      return;
+    }
+    const targetPaperId = citation.paper_id ?? paper.id;
+    const params = new URLSearchParams();
+    if (citation.document_id) params.set("document_id", citation.document_id);
+    if (citation.page_start) params.set("page", String(citation.page_start));
+    const target = `/reader/${targetPaperId}${params.size ? `?${params.toString()}` : ""}`;
+    if (targetPaperId === paper.id && (!citation.document_id || citation.document_id === activeDocumentId) && citation.page_start) {
+      setCurrentPage(citation.page_start);
+    } else {
+      navigate(target);
+    }
+  };
 
   return <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-900">
     <ReaderToolbar
@@ -108,14 +172,27 @@ export default function Reader() {
       onReadingStatusChange={(readingStatus) => {
         if (paperId) setReadingStatus.mutate({ paperId, readingStatus });
       }}
+      parseStatus={activeDocument.parse_status}
+      parseError={activeDocument.parse_error}
+      isParsePending={parseDocument.isPending}
+      onParse={() => parseDocument.mutate(activeDocumentId)}
       onEditPaper={() => setEditingPaper(true)}
     />
     <div className="flex min-h-0 flex-1">
-      <OutlinePanel items={outline} isLoading={isOutlineLoading} activePage={currentPage} onJumpToPage={setCurrentPage} />
-      <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} />
-      <ReaderSidebar annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} />
+      <div className="flex min-h-0 shrink-0 flex-col">
+        <div className="flex w-64 border-r border-gray-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "native" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("native")}>PDF 目录</button>
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "parsed" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("parsed")}>解析结构</button>
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "references" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("references")}>参考文献</button>
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "elements" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("elements")}>图表</button>
+        </div>
+        {outlineMode === "native" ? <OutlinePanel items={outline} isLoading={isOutlineLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "parsed" ? <ParsedSectionPanel sections={parsedSections} isLoading={parsedSectionsLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "references" ? <ParsedReferencePanel references={parsedReferences} isLoading={parsedReferencesLoading} onJumpToPage={setCurrentPage} onOpenPaper={(targetPaperId) => navigate(`/reader/${targetPaperId}`)} /> : <ParsedElementPanel elements={parsedElements} isLoading={parsedElementsLoading} onJumpToPage={setCurrentPage} />}
+      </div>
+      <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} onTranslateSelection={handleTranslateSelection} />
+      <ReaderSidebar paperId={paper.id} annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} activeTab={sideTab} translationText={translationState.text} translationResult={translationState.result} translationPending={translationState.pending} translationError={translationState.error} onTabChange={setSideTab} onRetryTranslation={() => { if (translationState.text) void runTranslation(translationState.text, translationState.targetLanguage); }} onOpenCitation={openCitation} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} onAddToNote={setEvidenceAnnotation} />
     </div>
     {editingPaper && <EditPaperDialog paper={paper} onClose={() => setEditingPaper(false)} onDelete={async (target) => { await deletePaper.mutateAsync(target.id); navigate("/library", { replace: true }); }} />}
+    {evidenceAnnotation && <AddAnnotationToNoteDialog annotation={evidenceAnnotation} paperTitle={paper.title} onClose={() => setEvidenceAnnotation(null)} />}
   </div>;
 }
 

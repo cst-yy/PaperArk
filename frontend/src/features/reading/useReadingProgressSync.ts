@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import type { PaperReadingStatus } from "@/features/paper/types";
 import { getReadingProgress, upsertReadingProgress } from "./api";
 
 const DEBOUNCE_MS = 1000;
@@ -16,6 +17,8 @@ type UseReadingProgressSyncOptions = {
   documentId?: string;
   currentPage: number;
   totalPages: number;
+  readingStatus?: PaperReadingStatus;
+  initialPage?: number;
   setCurrentPage: (page: number) => void;
 };
 
@@ -26,6 +29,8 @@ export function useReadingProgressSync({
   documentId,
   currentPage,
   totalPages,
+  readingStatus,
+  initialPage,
   setCurrentPage,
 }: UseReadingProgressSyncOptions) {
   const queryClient = useQueryClient();
@@ -36,6 +41,7 @@ export function useReadingProgressSync({
     ready: false,
     restoredKey: null as string | null,
     statusInvalidatedKey: null as string | null,
+    initialPage: null as number | null,
   });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const writeQueueRef = useRef(Promise.resolve());
@@ -82,6 +88,8 @@ export function useReadingProgressSync({
     state.ready = false;
     state.restoredKey = null;
     state.statusInvalidatedKey = null;
+    const requestedPage = initialPage;
+    state.initialPage = Number.isInteger(requestedPage) && (requestedPage ?? 0) > 0 ? requestedPage! : null;
 
     return () => {
       flush();
@@ -89,8 +97,19 @@ export function useReadingProgressSync({
       state.ready = false;
       state.restoredKey = null;
       state.statusInvalidatedKey = null;
+      state.initialPage = null;
     };
-  }, [paperId, documentId, flush]);
+  }, [paperId, documentId, flush, initialPage]);
+
+  useEffect(() => {
+    if (readingStatus !== "unread") return;
+    const scope = stateRef.current.scope;
+    if (!scope) return;
+    const key = scopeKey(scope);
+    if (stateRef.current.statusInvalidatedKey === key) {
+      stateRef.current.statusInvalidatedKey = null;
+    }
+  }, [readingStatus]);
 
   useEffect(() => {
     stateRef.current.currentPage = currentPage;
@@ -124,9 +143,13 @@ export function useReadingProgressSync({
     stateRef.current.ready = false;
 
     try {
-      const progress = await getReadingProgress(scope.paperId, scope.documentId);
+      const requestedPage = stateRef.current.initialPage;
+      stateRef.current.initialPage = null;
+      const progress = requestedPage === null
+        ? await getReadingProgress(scope.paperId, scope.documentId)
+        : null;
       if (stateRef.current.scope && scopeKey(stateRef.current.scope) === key) {
-        const page = Math.max(1, Math.min(progress?.current_page ?? 1, pdf.numPages));
+        const page = Math.max(1, Math.min(requestedPage ?? progress?.current_page ?? 1, pdf.numPages));
         stateRef.current.currentPage = page;
         setCurrentPage(page);
       }

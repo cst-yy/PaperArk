@@ -15,6 +15,7 @@ import {
   replacePaperMetadata,
   updatePaper,
   setPaperReadingStatus,
+  parseDocument,
 } from "./api";
 import type { PaperListParams, PaperCreateInput, PaperMetadataDraft, PaperMetadataUpdate, PaperReadingStatus, ReplaceAuthorsRequest, ReplaceFoldersRequest, ReplaceTagsRequest, SaveStage } from "./types";
 
@@ -141,6 +142,20 @@ export function useSetPaperReadingStatus() {
     mutationFn: ({ paperId, readingStatus }: { paperId: string; readingStatus: PaperReadingStatus }) =>
       setPaperReadingStatus(paperId, readingStatus),
     onSuccess: (_, { paperId }) => invalidatePaperData(queryClient, paperId),
+  });
+}
+
+export function useParseDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: parseDocument,
+    onSuccess: (_, documentId) => {
+      queryClient.invalidateQueries({ queryKey: ["papers"] });
+      queryClient.invalidateQueries({ queryKey: ["paper"] });
+      queryClient.invalidateQueries({ queryKey: ["document-sections", documentId] });
+      queryClient.invalidateQueries({ queryKey: ["document-references", documentId] });
+      queryClient.invalidateQueries({ queryKey: ["document-elements", documentId] });
+    },
   });
 }
 

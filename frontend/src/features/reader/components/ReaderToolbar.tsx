@@ -1,7 +1,7 @@
-import { ChevronLeft, ChevronRight, Minus, Pencil, Plus, ScanLine } from "lucide-react";
+import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Pencil, Plus, RefreshCw, ScanLine } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import type { PaperReadingStatus } from "@/features/paper/types";
+import type { DocumentParseStatus, PaperReadingStatus } from "@/features/paper/types";
 import { useReaderStore } from "@/stores/readerStore";
 
 interface ReaderToolbarProps {
@@ -9,6 +9,10 @@ interface ReaderToolbarProps {
   readingStatus: PaperReadingStatus;
   isReadingStatusPending?: boolean;
   onReadingStatusChange: (status: PaperReadingStatus) => void;
+  parseStatus: DocumentParseStatus;
+  parseError?: string | null;
+  isParsePending?: boolean;
+  onParse?: () => void;
   onEditPaper?: () => void;
 }
 
@@ -17,6 +21,10 @@ export function ReaderToolbar({
   readingStatus,
   isReadingStatusPending = false,
   onReadingStatusChange,
+  parseStatus,
+  parseError,
+  isParsePending = false,
+  onParse,
   onEditPaper,
 }: ReaderToolbarProps) {
   const currentPage = useReaderStore((state) => state.currentPage);
@@ -64,6 +72,17 @@ export function ReaderToolbar({
         <option value="archived">已归档</option>
       </select>
 
+      <span className="hidden max-w-36 truncate text-[11px] text-gray-500 lg:inline" title={parseError ?? undefined}>
+        {parseStatus === "pending" && "待解析"}
+        {parseStatus === "processing" && "解析中"}
+        {parseStatus === "ready" && "已解析"}
+        {parseStatus === "failed" && `解析失败${parseError ? `：${parseError}` : ""}`}
+      </span>
+      {(parseStatus === "pending" || parseStatus === "failed") && onParse && (
+        <button type="button" className="reader-toolbar-button" onClick={onParse} disabled={isParsePending} aria-label="重新解析 PDF" title={parseStatus === "failed" ? "重新解析 PDF" : "解析 PDF"}>
+          {isParsePending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+        </button>
+      )}
       {onEditPaper && <button type="button" className="reader-toolbar-button" onClick={onEditPaper} aria-label="编辑论文信息" title="编辑论文信息"><Pencil className="h-4 w-4" /></button>}
 
       <div className="flex items-center gap-1 rounded-md border border-gray-200 p-0.5 dark:border-slate-700">

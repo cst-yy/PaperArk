@@ -3,7 +3,7 @@ import type { AxiosError } from "axios";
 import { Upload, X, FileText, CheckCircle, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import { useUploadPaper } from "@/features/paper/hooks";
-import { MAX_PDF_SIZE_MB } from "@/features/paper/api";
+import { MAX_PDF_SIZE_MB, parseDocument } from "@/features/paper/api";
 
 interface ImportModalProps {
   onClose: () => void;
@@ -82,7 +82,7 @@ export function ImportModal({ onClose }: ImportModalProps) {
     );
 
     try {
-      await uploadMut.mutateAsync({
+      const paper = await uploadMut.mutateAsync({
         file: entry.file,
         onProgress: (progress) => {
           setEntries((prev) =>
@@ -92,6 +92,8 @@ export function ImportModal({ onClose }: ImportModalProps) {
           );
         },
       });
+      const documentId = paper.document?.id ?? paper.documents[0]?.id;
+      if (documentId) void parseDocument(documentId).catch(() => undefined);
       setEntries((prev) =>
         prev.map((e, i) =>
           i === index ? { ...e, state: "success", progress: 100 } : e

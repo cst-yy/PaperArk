@@ -1,43 +1,38 @@
-"""Embedding generation for text chunks using sentence-transformers."""
+"""Versioned embedding provider abstraction and OpenAI-compatible adapter."""
+from __future__ import annotations
+
+from typing import Protocol
+
+import httpx
 
 from app.core.config import settings
 
 
-class EmbeddingService:
-    """Generate vector embeddings for text chunks."""
+class EmbeddingProvider(Protocol):
+    model_name: str
+    dimension: int
 
-    def __init__(self):
-        self._model = None
-
-    @property
-    def model(self):
-        if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-                self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
-            except ImportError:
-                return None
-        return self._model
-
-    def embed(self, text: str) -> list[float] | None:
-        """Generate embedding for a single text."""
-        model = self.model
-        if model is None:
-            return None
-        embedding = model.encode(text, normalize_embeddings=True)
-        return embedding.tolist()
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]] | None:
-        """Generate embeddings for multiple texts."""
-        model = self.model
-        if model is None:
-            return None
-        embeddings = model.encode(texts, normalize_embeddings=True, batch_size=32)
-        return [e.tolist() for e in embeddings]
-
-    def embed_query(self, query: str) -> list[float] | None:
-        """Generate embedding for a search query."""
-        return self.embed(query)
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
 
 
-embedding_service = EmbeddingService()
+class OpenAICompatibleEmbeddingProvider:
+    def __init__(self, *, base_url: str | None = None, api_key: str | None = None,
+                 model_name: str | None = None, dimension: int | None = None):
+        self.base_url = (base_url or settings.EMBEDDING_BASE_URL).rstrip("/")
+        self.api_key = api_key if api_key is not None else settings.EMBEDDING_API_KEY
+        self.model_name = model_name or settings.EMBEDDING_MODEL
+        self.dimension = dimension or settings.EMBEDDING_DIMENSION
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not self.api_key:
+            raise RuntimeError("EMBEDDING_API_KEY is not configured")
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {"model": self.model_name, "input": texts, "dimensions": self.dimension}
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(f"{self.base_url}/embeddings", headers=headers, json=payload)
+            response.raise_for_status()
+        data = sorted(response.json()["data"], key=lambda item: item["index"])
+        vectors = [item["embedding"] for item in data]
+        if len(vectors) != len(texts) or any(len(vector) != self.dimension for vector in vectors):
+            raise RuntimeError("Embedding provider returned an invalid batch shape")
+        return vectors

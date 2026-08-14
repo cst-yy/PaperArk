@@ -13,6 +13,7 @@ SearchSource = Literal[
     "research_experiment", "research_conclusion", "research_thought",
 ]
 SearchMatchType = Literal["exact", "prefix", "fuzzy", "fulltext"]
+RetrievalMethod = Literal["lexical", "semantic"]
 
 
 class SearchHit(BaseModel):
@@ -28,6 +29,7 @@ class SearchHit(BaseModel):
     section_id: UUID | None = None
     raw_score: float = 0.0
     match_type: SearchMatchType = "fulltext"
+    retrieval_method: RetrievalMethod = "lexical"
 
 
 class SearchMatchResponse(BaseModel):
@@ -71,8 +73,16 @@ class SearchNoteResult(BaseModel):
     matches: list[SearchMatchResponse]
 
 
+class SearchRetrievalMetadata(BaseModel):
+    requested_mode: Literal["lexical", "semantic", "hybrid"]
+    effective_mode: Literal["lexical", "semantic", "hybrid"]
+    semantic_available: bool
+    semantic_index_ready: bool
+
+
 class SearchPageResponse(BaseModel):
     items: list[SearchPaperResult | SearchNoteResult]
     total: int
     page: int
     page_size: int
+    retrieval: SearchRetrievalMetadata | None = None

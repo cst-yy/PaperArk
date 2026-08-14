@@ -33,4 +33,10 @@ export interface SearchPageResponse {
   total: number;
   page: number;
   page_size: number;
+  retrieval?: {
+    requested_mode: "lexical" | "semantic" | "hybrid";
+    effective_mode: "lexical" | "semantic" | "hybrid";
+    semantic_available: boolean;
+    semantic_index_ready: boolean;
+  } | null;
 }

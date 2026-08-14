@@ -56,8 +56,12 @@ class NoteService:
             raise InvalidNoteError("paper and research notes require paper_id")
         if "paper_id" in changes:
             await self._validate_paper(user_id, paper_id)
+        embedding_changed = any(field in changes and changes[field] != getattr(note, field) for field in ("title", "content_markdown"))
         for field, value in changes.items():
             setattr(note, field, value)
+        if embedding_changed:
+            note.embedding_status = "pending"
+            note.embedding_error = None
         await self.db.flush()
         await self.db.refresh(note)
         return note
@@ -67,8 +71,12 @@ class NoteService:
         if data.note_type != note.note_type:
             raise InvalidNoteError("note_type is immutable after creation")
         await self._validate_paper(user_id, data.paper_id)
+        embedding_changed = data.title != note.title or data.content_markdown != note.content_markdown
         for field, value in data.model_dump().items():
             setattr(note, field, value)
+        if embedding_changed:
+            note.embedding_status = "pending"
+            note.embedding_error = None
         await self.db.flush()
         await self.db.refresh(note)
         return note

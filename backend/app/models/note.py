@@ -1,11 +1,18 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Computed, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, Computed, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.config import settings
+
+try:
+    from pgvector.sqlalchemy import Vector
+    HAS_PGVECTOR = True
+except ImportError:
+    HAS_PGVECTOR = False
 
 
 class Note(Base):
@@ -13,6 +20,9 @@ class Note(Base):
     __table_args__ = (
         CheckConstraint("note_type IN ('general', 'paper', 'research')", name="ck_notes_note_type"),
         Index("ix_notes_search_vector", "search_vector", postgresql_using="gin"),
+        Index("ix_notes_embedding_hnsw", "embedding", postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"}, postgresql_where=text("embedding IS NOT NULL")),
+        CheckConstraint("embedding_status IN ('pending', 'processing', 'ready', 'failed')", name="ck_notes_embedding_status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -29,6 +39,15 @@ class Note(Base):
     search_vector: Mapped[object] = mapped_column(
         TSVECTOR, Computed("to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content_markdown, ''))", persisted=True)
     )
+    if HAS_PGVECTOR:
+        embedding: Mapped[list[float] | None] = mapped_column(Vector(settings.EMBEDDING_DIMENSION), nullable=True)
+    else:
+        embedding = None
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embedding_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", index=True)
+    embedding_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

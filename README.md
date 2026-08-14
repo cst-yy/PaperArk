@@ -755,6 +755,38 @@ Note 标题和 Markdown 正文使用 `simple` 配置的 generated `tsvector` 与
 
 Search UI 现在区分“论文 / 笔记”实体；结构化命中打开 `/notes/{id}?view=structured`，普通命中打开 Note 正文。Reader 右侧新增当前 Paper 的关联笔记列表，因此双向链路为 `Reader → Note → Evidence → Reader`，但 Reader 不嵌入完整笔记编辑器。
 
+### S10-A：Embedding Infrastructure
+
+Chunk 与 Note 现在拥有独立、可重建的 embedding 生命周期字段：固定维度向量、`embedding_model`、`embedding_dimension`、基于实际 provider 输入计算的 `embedding_content_hash`，以及 `pending | processing | ready | failed` 状态和错误信息。Chunk 的输入为 Section title + Chunk content；Note 的输入为 title + 清理常见 Markdown/LaTeX 标记后的正文，明确不包含 Evidence snapshot 或 Structured Research Profile。
+
+`EmbeddingProvider` 协议将业务服务与供应商 SDK 解耦，首个实现为 OpenAI-compatible HTTP provider。`EmbeddingLifecycleService` 按配置批量处理当前用户的 stale Chunk/Note，内容、模型、维度与 hash 均未变化时直接跳过；provider 失败只把当前批次标记为 failed，不回滚或覆盖主数据。新 Chunk 默认 pending，Note 标题或 Markdown 变化后也会在原事务内标为 pending；reparse 删除旧 Chunk 时其内嵌向量天然一并删除。
+
+管理接口为 `POST /api/embeddings/rebuild` 与 `GET /api/embeddings/status`。不会在应用启动时扫描或调用 embedding 服务，也没有把 API key 写入数据库或 Workspace backup。S10-A 不改变 `/api/search`，Semantic Search、Hybrid/RRF 和 RAG Context 分别留给 S10-B/C/D。
+
+### S10-B：Semantic Retrieval
+
+`GET /api/search` 现在支持 `mode=lexical|semantic`，默认 lexical，因此 S8/S9 的调用和结果契约保持不变。Semantic mode 仅调用 Query Embedding、Chunk vector provider 与 Note vector provider，不调用 lexical providers，也不会静默降级。Query vector 不持久化，并且必须与当前 Workspace 的 model/dimension 完全一致；provider 不可用或维度错误时返回明确的 503。
+
+Chunk 与 Note 的余弦距离计算、过滤、排序和 top-K 全部在 PostgreSQL 中完成。检索仅接受 `ready + current model + current dimension + non-null vector`，并显式通过 Paper/Note 的 `user_id` 隔离。每类 provider 默认取 50 个候选并应用可配置的低阈值；Chunk 仍聚合为 Paper、Note 仍聚合为 Note，最终继续按实体分页。内部 hit 使用 `retrieval_method=semantic`，但公开 source 仍为 `chunk` 或 `note_content`。
+
+Chunk 与 Note 均新增 cosine HNSW partial index。索引资格已通过 `enable_seqscan=off` 的 EXPLAIN 验证，两类查询都产生对应 HNSW Index Scan。Search 页面新增 URL 驱动的“关键词 / 语义”切换，`mode=semantic` 可刷新、复制和前进后退恢复；结果卡和 Reader/Note 导航保持原契约。S10-B 不包含 Hybrid、RRF、reranker 或 RAG context。
+
+### S10-C：Hybrid Retrieval + RRF
+
+`mode=hybrid` 顺序执行既有 lexical 与 semantic 两条独立候选链；两侧各自完成 Paper/Note 实体聚合后，才以 `(entity_type, UUID)` 为稳定 key 做实体级 Reciprocal Rank Fusion。第一版使用等权标准公式 `1 / (60 + rank)`，不直接相加 lexical raw score 与 cosine similarity。候选池会随目标页深度增长并限制为最多 200 个实体，最终仍按融合后的 Paper/Note 统一列表分页。
+
+融合采用 union 而非 intersection：只被一条链召回的实体不会丢失，同时出现在两条链中的实体获得双路排名贡献。两侧 matches 会合并并按 source/document/section/page/text 稳定去重，保留内容来源与 Reader 定位信息。纯函数 `rrf_fuse()` 记录 lexical/semantic rank provenance，并使用明确的 rank、entity type 与 UUID tie-break，重复查询顺序稳定。
+
+响应可选返回 `retrieval` metadata。Semantic mode 的 provider failure 仍为 503；Hybrid mode 遇到相同故障则显式降级为 lexical，并返回 `semantic_available=false`，前端显示轻量警告。当前模型没有 ready vector 时返回 `semantic_index_ready=false`，与 provider 故障区分。Search UI 支持“关键词 / 语义 / 混合”三种 URL 模式，但默认仍为无外部依赖的 lexical。S10-C 不包含 RAG context assembly。
+
+### S10-D：RAG Context Assembly
+
+新增 `POST /api/rag/context`，将 Chunk/Note 粒度的 lexical、semantic 或 hybrid 候选组装为可追溯上下文包，不调用 LLM、不生成回答或 Prompt。RAG DTO 与 Search Card 完全解耦：`RAGCandidate` 保留 source-level rank，最终 `RAGSource` 明确区分 `paper_chunk` 与 `note`，并携带 Paper、Document、Section、页码、Note 及稳定 `source_key` provenance。
+
+RAG retrieval 直接复用 PostgreSQL FTS、pgvector 与 RRF 公式，但融合发生在 `chunk:{id}` / `note:{id}` source 层而非 Search 的 Paper/Note entity 层。可选 `paper_id` 会在数据库查询阶段限制 Chunk 与 Paper Note，同时排除 General Note、其他 Paper 和其他用户数据。Semantic failure 规则与 Search 一致：semantic 模式返回 503，hybrid 显式降级 lexical。
+
+纯 Python `RAGContextAssembler` 负责稳定去重、同 Document/Section 的保守相邻 Chunk window 合并、禁止跨 Section 合并、Library-wide Paper 多样性、最多 2 个 Note、单来源 cap、总 token budget 和确定性 formatter。Token 为近似估算，并包含 provenance header 开销；截断会同时标记 source 与整个 context。格式明确使用 `[SOURCE n | PAPER]` / `[SOURCE n | NOTE]`，防止后续模型混淆论文证据和用户解释。
+
 Search 页面已适配 Paper 结果卡、来源徽标、snippet 和 Paper 级分页。可定位的 Section/Chunk/Reference/Figure/Table match 跳转到 `/reader/{paperId}?document_id={documentId}&page={pageStart}`。Reader 仅在当前 Paper scope 初始化时消费一次 URL page，优先级为 URL page → ReadingProgress → Page 1，后续翻页不受 URL 持续控制。
 
 ```bash
@@ -838,6 +870,23 @@ curl -X PUT "http://localhost:8000/api/papers/<paper_id>/reading-progress" \
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://paper:paper123@localhost:5432/paper_workspace` | PostgreSQL 连接串 |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis 连接串 |
+| `EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible embedding API 根地址 |
+| `EMBEDDING_API_KEY` | 空 | Embedding secret，仅从环境读取 |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | 当前 Workspace embedding 模型 |
+| `EMBEDDING_DIMENSION` | `384` | 固定向量维度；变更需要迁移 |
+| `EMBEDDING_BATCH_SIZE` | `32` | 每次 provider 请求的最大文本数 |
+| `SEMANTIC_CANDIDATE_K` | `50` | 每个 semantic provider 的数据库候选数 |
+| `SEMANTIC_MIN_SIMILARITY` | `0.30` | Semantic 初始余弦相似度下限 |
+| `HYBRID_RRF_K` | `60` | Reciprocal Rank Fusion 的稳定常数 |
+| `HYBRID_CANDIDATE_ENTITIES` | `50` | Hybrid 每条候选链的最小实体池 |
+| `HYBRID_MAX_CANDIDATE_ENTITIES` | `200` | Hybrid 深分页候选池上限 |
+| `RAG_CANDIDATE_K` | `40` | 每条 RAG retrieval 链的 source 候选数 |
+| `RAG_DEFAULT_MAX_SOURCES` | `8` | 默认上下文来源上限 |
+| `RAG_DEFAULT_TOKEN_BUDGET` | `6000` | 默认近似 token 预算 |
+| `RAG_MAX_TOKEN_BUDGET` | `12000` | API 允许的最大上下文预算 |
+| `RAG_MAX_CHUNK_SOURCE_TOKENS` | `1200` | 单个 Chunk/window 上限 |
+| `RAG_MAX_NOTE_SOURCE_TOKENS` | `1000` | 单个 Note 上限 |
+| `RAG_MAX_NOTE_SOURCES` | `2` | 默认 Note 来源数量上限 |
 | `STORAGE_DIR` | `./storage` | 文件存储目录 |
 | `MAX_UPLOAD_SIZE_MB` | `100` | PDF 上传最大大小 (MB) |
 | `SECRET_KEY` | `change-this-in-production` | JWT 密钥 |
@@ -918,8 +967,12 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S9 Core | Markdown + Evidence-backed Structured Research Notes | ✅ |
 | S9-D | Note Search + Reader Integration | ✅ |
 | S9 | Markdown + Evidence-backed Structured Research Notes | ✅ |
-| S10 | Embedding + Semantic / Hybrid Retrieval + RAG Base | 下一步 |
-| S11 | AI Summary + Q&A |
+| S10-A | Versioned Chunk/Note Embedding Infrastructure | ✅ |
+| S10-B | Semantic Retrieval | ✅ |
+| S10-C | Hybrid Retrieval + RRF | ✅ |
+| S10-D | RAG Context Assembly | ✅ |
+| S10 | Semantic / Hybrid Retrieval + RAG Base | ✅ |
+| S11 | AI Deep Reading | 下一步 |
 | S12 | 论文关系 + 知识图谱 |
 
 ---

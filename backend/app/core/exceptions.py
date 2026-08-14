@@ -106,3 +106,11 @@ class NoteNotFoundError(DomainError):
 
 class InvalidNoteError(DomainError):
     """Raised when a note aggregate violates paper ownership or type rules."""
+
+
+class SemanticRetrievalError(DomainError):
+    """Raised when an explicitly requested semantic provider is unavailable."""
+
+
+class RAGContextError(DomainError):
+    """Raised when a RAG context scope is invalid or inaccessible."""

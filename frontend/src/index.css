@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply btn bg-primary-500 text-white hover:bg-primary-600;
+  }
+  .btn-ghost {
+    @apply btn text-gray-600 hover:bg-gray-100;
+  }
+  .input {
+    @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-400;
+  }
+  .card {
+    @apply rounded-xl border border-gray-200 bg-white p-4 shadow-sm;
+  }
+  .reader-toolbar-button {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-slate-800;
+  }
+  .reader-side-tab {
+    @apply flex flex-1 items-center justify-center gap-1.5 border-b-2 border-transparent px-2 py-2.5 text-xs text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100;
+  }
+  .reader-side-tab-active {
+    @apply border-primary-500 text-primary-600 dark:text-primary-100;
+  }
+}

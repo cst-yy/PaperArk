@@ -1,0 +1,12 @@
+# 关闭所有容器、销毁旧数据库
+docker compose down
+# 重新启动，程序会自动按照最新模型新建数据表
+docker compose up -d
+# 重新导入种子论文数据
+docker exec paper_workspace_backend python -m app.seed
+
+# 查看日志
+docker logs -f paper_workspace_backend
+
+docker logs -f paper_workspace_frontend
+

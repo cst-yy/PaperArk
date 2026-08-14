@@ -1,0 +1,17 @@
+import { Check, Plus } from "lucide-react";
+
+import type { Tag } from "@/features/tag/types";
+import { getStableColor } from "@/utils";
+
+interface PaperTagSelectorProps {
+  tags: Tag[];
+  selectedIds: string[];
+  disabled?: boolean;
+  onChange: (ids: string[]) => void;
+  onCreate: () => void;
+}
+
+export function PaperTagSelector({ tags, selectedIds, disabled, onChange, onCreate }: PaperTagSelectorProps) {
+  const toggle = (tagId: string) => onChange(selectedIds.includes(tagId) ? selectedIds.filter((id) => id !== tagId) : [...selectedIds, tagId]);
+  return <section className="space-y-3"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold">标签</h3><button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" disabled={disabled} onClick={onCreate}><Plus className="h-3.5 w-3.5" />新建标签</button></div><div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 p-3 dark:border-slate-700">{tags.length === 0 ? <p className="text-xs text-gray-500">暂无标签，可先新建一个。</p> : tags.map((tag) => { const selected = selectedIds.includes(tag.id); return <button type="button" key={tag.id} disabled={disabled} onClick={() => toggle(tag.id)} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${selected ? "border-transparent text-white" : "border-gray-200 text-gray-600 dark:border-slate-600 dark:text-gray-300"}`} style={selected ? { backgroundColor: tag.color || getStableColor(tag.name) } : undefined}>{selected && <Check className="h-3 w-3" />}{tag.name}</button>; })}</div></section>;
+}

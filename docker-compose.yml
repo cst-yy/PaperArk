@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: paper_workspace_db
+    environment:
+      POSTGRES_USER: paper
+      POSTGRES_PASSWORD: paper123
+      POSTGRES_DB: paper_workspace
+    ports:
+      - "5432:5432"
+    volumes:
+      - "${WORKSPACE_DIR}/database/postgres:/var/lib/postgresql/data"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paper"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: paper_workspace_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: paper_workspace_backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://paper:paper123@db:5432/paper_workspace
+      REDIS_URL: redis://redis:6379/0
+      WORKSPACE_DIR: /workspace
+      BACKUP_DIR: /app/backups
+      STORAGE_DIR: /workspace/storage
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - "${WORKSPACE_DIR}:/workspace"
+      - "${BACKUP_DIR}:/app/backups"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  frontend:
+    build: ./frontend
+    container_name: paper_workspace_frontend
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  redisdata:

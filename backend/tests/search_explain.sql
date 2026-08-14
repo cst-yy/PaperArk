@@ -23,3 +23,8 @@ WHERE search_vector @@ websearch_to_tsquery('simple', 'unique-scale-term');
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT id FROM "references"
 WHERE search_vector @@ websearch_to_tsquery('simple', 'unique-scale-term');
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id
+FROM notes
+WHERE user_id = :'user_id'
+  AND search_vector @@ websearch_to_tsquery('simple', 'unique-scale-term');

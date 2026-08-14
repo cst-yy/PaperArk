@@ -98,3 +98,11 @@ class AnnotationNotFoundError(DomainError):
 
 class InvalidAnnotationError(DomainError):
     """Raised when annotation anchors or ownership are invalid."""
+
+
+class NoteNotFoundError(DomainError):
+    """Raised when a note is missing or belongs to another user."""
+
+
+class InvalidNoteError(DomainError):
+    """Raised when a note aggregate violates paper ownership or type rules."""

@@ -10,14 +10,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Paper, PaperAuthor
-from app.schemas.search import SearchHit, SearchMatchResponse, SearchPageResponse, SearchPaperBrief, SearchPaperResult
-from app.services.search_providers import ChunkSearchProvider, ElementSearchProvider, MetadataSearchProvider, ReferenceSearchProvider, SectionSearchProvider
+from app.models import Note, Paper, PaperAuthor
+from app.schemas.search import (SearchHit, SearchMatchResponse, SearchNoteBrief,
+    SearchNoteResult, SearchPageResponse, SearchPaperBrief, SearchPaperResult)
+from app.services.search_providers import (ChunkSearchProvider, ElementSearchProvider,
+    MetadataSearchProvider, NoteSearchProvider, ReferenceSearchProvider, SectionSearchProvider)
 from app.services.search_query import QueryNormalizer
 
 SOURCE_WEIGHT = {"title": 1.0, "doi": 1.0, "arxiv": 1.0, "author": 0.85, "keyword": 0.85,
     "tag": 0.8, "abstract": 0.75, "section": 0.75, "journal": 0.7, "conference": 0.7,
-    "publisher": 0.65, "chunk": 0.6, "reference": 0.45, "figure": 0.4, "table": 0.4}
+    "publisher": 0.65, "chunk": 0.6, "reference": 0.45, "figure": 0.4, "table": 0.4,
+    "note_title": 1.0, "note_content": 0.75, "research_background": 0.75,
+    "research_problem": 0.85, "research_method": 0.75, "research_contribution": 0.85,
+    "research_experiment": 0.75, "research_conclusion": 0.7, "research_thought": 0.7}
 MAX_MATCHES = 5
 
 
@@ -27,10 +32,12 @@ class SearchAggregator:
         value = hit.snippet or hit.text
         return re.sub(r"\s+", " ", value).strip().casefold()[:500]
 
-    def aggregate(self, hits: list[SearchHit]) -> dict[uuid.UUID, tuple[float, int, list[SearchHit]]]:
+    def aggregate(self, hits: list[SearchHit], id_field: str) -> dict[uuid.UUID, tuple[float, int, list[SearchHit]]]:
         grouped: dict[uuid.UUID, list[SearchHit]] = defaultdict(list)
         for hit in hits:
-            grouped[hit.paper_id].append(hit)
+            entity_id = getattr(hit, id_field)
+            if entity_id is not None:
+                grouped[entity_id].append(hit)
         output = {}
         for paper_id, paper_hits in grouped.items():
             sources = {hit.source for hit in paper_hits}
@@ -59,6 +66,7 @@ class SearchService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.providers = [MetadataSearchProvider(), SectionSearchProvider(), ChunkSearchProvider(), ReferenceSearchProvider(), ElementSearchProvider()]
+        self.note_provider = NoteSearchProvider()
         self.aggregator = SearchAggregator()
 
     async def search(self, user_id: uuid.UUID, query: str, page: int = 1, page_size: int = 20) -> SearchPageResponse:
@@ -73,25 +81,42 @@ class SearchService:
             if normalized.looks_like_doi or normalized.looks_like_arxiv else self.providers)
         for provider in providers:
             hits.extend(await provider.search(self.db, user_id, normalized))
-        aggregated = self.aggregator.aggregate(hits)
-        if not aggregated:
+        paper_aggregated = self.aggregator.aggregate(hits, "paper_id")
+        note_hits = await self.note_provider.search(self.db, user_id, normalized)
+        note_aggregated = self.aggregator.aggregate(note_hits, "note_id")
+        if not paper_aggregated and not note_aggregated:
             return SearchPageResponse(items=[], total=0, page=page, page_size=page_size)
         papers = (await self.db.execute(
-            select(Paper).where(Paper.user_id == user_id, Paper.id.in_(aggregated)).options(selectinload(Paper.authors).selectinload(PaperAuthor.author))
+            select(Paper).where(Paper.user_id == user_id, Paper.id.in_(paper_aggregated)).options(selectinload(Paper.authors).selectinload(PaperAuthor.author))
         )).scalars().all()
         paper_map = {paper.id: paper for paper in papers}
-        ranked_ids = sorted((paper_id for paper_id in aggregated if paper_id in paper_map), key=lambda paper_id: (
-            -aggregated[paper_id][0],
-            -max(SOURCE_WEIGHT[hit.source] for hit in aggregated[paper_id][2]),
-            -paper_map[paper_id].updated_at.timestamp(),
-            str(paper_id),
-        ))
-        total = len(ranked_ids)
-        page_ids = ranked_ids[(page - 1) * page_size: page * page_size]
-        items = []
-        for paper_id in page_ids:
+        notes = (await self.db.execute(select(Note).where(
+            Note.user_id == user_id, Note.id.in_(note_aggregated)
+        ))).scalars().all()
+        note_map = {note.id: note for note in notes}
+        paper_titles = {paper.id: paper.title for paper in (await self.db.execute(select(Paper).where(
+            Paper.user_id == user_id, Paper.id.in_({n.paper_id for n in notes if n.paper_id})
+        ))).scalars().all()}
+
+        entities = [("paper", eid, data[0], paper_map[eid].updated_at) for eid, data in paper_aggregated.items() if eid in paper_map]
+        entities += [("note", eid, data[0], note_map[eid].updated_at) for eid, data in note_aggregated.items() if eid in note_map]
+        entities.sort(key=lambda item: (-item[2], -item[3].timestamp(), item[0], str(item[1])))
+        total = len(entities)
+        page_entities = entities[(page - 1) * page_size: page * page_size]
+        items: list[SearchPaperResult | SearchNoteResult] = []
+        for entity_type, entity_id, _, _ in page_entities:
+            aggregated = paper_aggregated if entity_type == "paper" else note_aggregated
+            if entity_type == "note":
+                note = note_map[entity_id]
+                score, match_count, matches = aggregated[entity_id]
+                items.append(SearchNoteResult(note=SearchNoteBrief(id=note.id, title=note.title,
+                    note_type=note.note_type, paper_id=note.paper_id,
+                    paper_title=paper_titles.get(note.paper_id)), score=score, match_count=match_count,
+                    matches=[SearchMatchResponse(**hit.model_dump(exclude={"entity_type", "paper_id", "note_id", "raw_score", "match_type"})) for hit in matches]))
+                continue
+            paper_id = entity_id
             paper = paper_map[paper_id]
             score, match_count, matches = aggregated[paper_id]
             authors = [assignment.author.name for assignment in sorted(paper.authors, key=lambda item: item.author_order)]
-            items.append(SearchPaperResult(paper=SearchPaperBrief(id=paper.id, title=paper.title, publication_year=paper.publication_year, authors=authors), score=score, match_count=match_count, matches=[SearchMatchResponse(**hit.model_dump(exclude={"paper_id", "raw_score", "match_type"})) for hit in matches]))
+            items.append(SearchPaperResult(paper=SearchPaperBrief(id=paper.id, title=paper.title, publication_year=paper.publication_year, authors=authors), score=score, match_count=match_count, matches=[SearchMatchResponse(**hit.model_dump(exclude={"entity_type", "paper_id", "note_id", "raw_score", "match_type"})) for hit in matches]))
         return SearchPageResponse(items=items, total=total, page=page, page_size=page_size)

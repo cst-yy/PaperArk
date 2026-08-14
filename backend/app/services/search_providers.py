@@ -5,15 +5,16 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Author, Chunk, Document, DocumentElement, Keyword, Paper, PaperAuthor,
-    PaperKeyword, PaperTag, Reference, Section, Tag,
+    Author, Chunk, Document, DocumentElement, Keyword, Note, Paper, PaperAuthor,
+    PaperKeyword, PaperTag, Reference, ResearchContribution, ResearchExperiment,
+    ResearchNoteProfile, Section, Tag,
 )
 from app.schemas.search import SearchHit, SearchMatchType
-from app.services.search_query import NormalizedSearchQuery, build_snippet
+from app.services.search_query import NormalizedSearchQuery, build_snippet, normalize_note_search_text
 
 def _metadata_quality(value: str, query: NormalizedSearchQuery, similarity: float) -> tuple[SearchMatchType, float]:
     folded = " ".join(value.split()).casefold()
@@ -170,3 +171,69 @@ class ElementSearchProvider(_FullTextProvider):
             text=item.caption, snippet=build_snippet(item.caption, query), page_start=item.page_number,
             page_end=item.page_number, section_id=item.section_id, raw_score=rank,
             match_type="fulltext") for item, paper_id, rank in await self.rows(db, user_id, query)]
+
+
+class NoteSearchProvider:
+    """User interpretation search. Evidence snapshots are deliberately excluded."""
+
+    async def search(self, db: AsyncSession, user_id: uuid.UUID, query: NormalizedSearchQuery) -> list[SearchHit]:
+        pattern = f"%{query.normalized}%"
+        hits: list[SearchHit] = []
+        tsquery = func.websearch_to_tsquery("simple", query.normalized)
+        for source, column, weight in (
+            ("note_title", Note.title, 1.0),
+            ("note_content", Note.content_markdown, 0.75),
+        ):
+            rows = (await db.execute(select(Note.id, Note.paper_id, column).where(
+                Note.user_id == user_id,
+                or_(Note.search_vector.op("@@")(tsquery), column.ilike(pattern))
+            ))).all()
+            for note_id, paper_id, value in rows:
+                quality, score = ("fulltext", weight)
+                if source == "note_title":
+                    folded = " ".join(value.split()).casefold()
+                    quality = "exact" if folded == query.normalized else "prefix" if folded.startswith(query.normalized) else "fuzzy"
+                    score = 1.0 if quality == "exact" else 0.9 if quality == "prefix" else 0.8
+                visible = normalize_note_search_text(value) if source == "note_content" else value
+                hits.append(SearchHit(entity_type="note", note_id=note_id, paper_id=paper_id,
+                    source=source, text=visible, snippet=build_snippet(visible, query), raw_score=score, match_type=quality))
+
+        profile_fields = (
+            ("research_background", ResearchNoteProfile.background, 0.75),
+            ("research_background", ResearchNoteProfile.prior_work_limitations, 0.75),
+            ("research_problem", ResearchNoteProfile.research_problem, 0.85),
+            ("research_method", ResearchNoteProfile.method_summary, 0.75),
+            ("research_conclusion", ResearchNoteProfile.results_summary, 0.7),
+            ("research_conclusion", ResearchNoteProfile.conclusion, 0.7),
+            ("research_conclusion", ResearchNoteProfile.limitations, 0.7),
+            ("research_thought", ResearchNoteProfile.my_thoughts, 0.7),
+        )
+        for source, column, score in profile_fields:
+            rows = (await db.execute(select(Note.id, Note.paper_id, column)
+                .join(ResearchNoteProfile, ResearchNoteProfile.note_id == Note.id)
+                .where(Note.user_id == user_id, column.ilike(pattern)))).all()
+            hits.extend(SearchHit(entity_type="note", note_id=nid, paper_id=pid, source=source,
+                text=value, snippet=build_snippet(value, query), raw_score=score) for nid, pid, value in rows)
+
+        for model, fields, source, score in (
+            (ResearchContribution, (ResearchContribution.problem, ResearchContribution.prior_limitation, ResearchContribution.innovation, ResearchContribution.solution), "research_contribution", 0.85),
+            (ResearchExperiment, (ResearchExperiment.task, ResearchExperiment.result, ResearchExperiment.conclusion), "research_experiment", 0.75),
+        ):
+            for column in fields:
+                rows = (await db.execute(select(Note.id, Note.paper_id, column)
+                    .join(ResearchNoteProfile, ResearchNoteProfile.note_id == Note.id)
+                    .join(model, model.research_note_id == ResearchNoteProfile.id)
+                    .where(Note.user_id == user_id, column.ilike(pattern)))).all()
+                hits.extend(SearchHit(entity_type="note", note_id=nid, paper_id=pid, source=source,
+                    text=value, snippet=build_snippet(value, query), raw_score=score) for nid, pid, value in rows)
+        # JSON arrays remain searchable without creating provider-specific tables.
+        for column in (ResearchExperiment.datasets_json, ResearchExperiment.baselines_json, ResearchExperiment.metrics_json):
+            rows = (await db.execute(select(Note.id, Note.paper_id, column)
+                .join(ResearchNoteProfile, ResearchNoteProfile.note_id == Note.id)
+                .join(ResearchExperiment, ResearchExperiment.research_note_id == ResearchNoteProfile.id)
+                .where(Note.user_id == user_id, func.cast(column, String).ilike(pattern)))).all()
+            for nid, pid, values in rows:
+                text = ", ".join(values or [])
+                hits.append(SearchHit(entity_type="note", note_id=nid, paper_id=pid,
+                    source="research_experiment", text=text, snippet=build_snippet(text, query), raw_score=0.75))
+        return hits

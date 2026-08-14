@@ -15,6 +15,8 @@ export function AppRouter() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/library" element={<Library />} />
         <Route path="/notes" element={<Notes />} />
+        <Route path="/notes/:noteId" element={<Notes />} />
+        <Route path="/papers/:paperId/notes" element={<Notes />} />
         <Route path="/search" element={<Search />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

@@ -31,10 +31,10 @@ export default function Search() {
     {searchQuery.isFetching ? <div className="py-10 text-center text-sm text-gray-400">正在搜索…</div>
       : searchQuery.isError ? <div className="py-10 text-center text-sm text-red-500">搜索失败，请稍后重试。</div>
       : searchQuery.data?.items.length ? <>
-        <p className="mb-3 text-xs text-gray-500">共 {searchQuery.data.total} 篇论文</p>
-        <div className="space-y-3">{searchQuery.data.items.map((result) => <SearchResultCard key={result.paper.id} result={result} />)}</div>
+        <p className="mb-3 text-xs text-gray-500">共 {searchQuery.data.total} 条研究信息</p>
+        <div className="space-y-3">{searchQuery.data.items.map((result) => <SearchResultCard key={`${result.entity_type}-${result.entity_type === "paper" ? result.paper.id : result.note.id}`} result={result} />)}</div>
         {totalPages > 1 && <div className="mt-5 flex items-center justify-center gap-3"><button className="btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button><span className="text-xs text-gray-500">{page} / {totalPages}</span><button className="btn-secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button></div>}
-      </> : query.length >= 2 ? <div className="py-10 text-center text-sm text-gray-400">没有找到与“{query}”相关的论文</div>
+      </> : query.length >= 2 ? <div className="py-10 text-center text-sm text-gray-400">没有找到与“{query}”相关的论文或笔记</div>
         : <div className="py-10 text-center text-sm text-gray-400">输入至少 2 个字符开始搜索</div>}
   </div>;
 }

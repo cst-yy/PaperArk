@@ -50,3 +50,13 @@ def build_snippet(text: str, query: NormalizedSearchQuery, max_chars: int = 240)
     start = max(0, end - max_chars)
     excerpt = compact[start:end].strip()
     return ("…" if start else "") + excerpt + ("…" if end < len(compact) else "")
+
+
+def normalize_note_search_text(text: str) -> str:
+    """Lightweight Markdown/LaTeX cleanup; intentionally not a full parser."""
+    value = re.sub(r"```[^\n]*|```", " ", text)
+    value = re.sub(r"^\s{0,3}#{1,6}\s+", "", value, flags=re.MULTILINE)
+    value = re.sub(r"!?\[([^]]*)\]\([^)]*\)", r"\1", value)
+    value = re.sub(r"[`*_~]", "", value)
+    value = re.sub(r"\$+|\\\(|\\\)|\\\[|\\\]", " ", value)
+    return " ".join(value.split())

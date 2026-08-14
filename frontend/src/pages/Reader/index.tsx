@@ -9,6 +9,7 @@ import { getDocumentFileUrl } from "@/features/paper/api";
 import { EditPaperDialog } from "@/features/paper/components/EditPaperDialog";
 import { useDeletePaper, usePaper, useParseDocument, useSetPaperReadingStatus } from "@/features/paper/hooks";
 import { useReadingProgressSync } from "@/features/reading/useReadingProgressSync";
+import { AddAnnotationToNoteDialog } from "@/features/notes/AddAnnotationToNoteDialog";
 import { OutlinePanel } from "@/features/reader/components/OutlinePanel";
 import { ParsedSectionPanel } from "@/features/reader/components/ParsedSectionPanel";
 import { ParsedReferencePanel } from "@/features/reader/components/ParsedReferencePanel";
@@ -53,6 +54,7 @@ function ReaderContent() {
   const [activeAnnotation, setActiveAnnotation] = useState<{ paperId: string; id: string } | null>(null);
   const [areaModeState, setAreaModeState] = useState<{ paperId: string; enabled: boolean } | null>(null);
   const [editingPaper, setEditingPaper] = useState(false);
+  const [evidenceAnnotation, setEvidenceAnnotation] = useState<Annotation | null>(null);
   const [outlineMode, setOutlineMode] = useState<"native" | "parsed" | "references" | "elements">("native");
   const activePdf = loadedPdf && loadedPdf.paperId === paperId && loadedPdf.documentId === documentId ? loadedPdf.pdf : null;
   const activeAnnotationId = activeAnnotation && activeAnnotation.paperId === paperId ? activeAnnotation.id : null;
@@ -151,9 +153,10 @@ function ReaderContent() {
         {outlineMode === "native" ? <OutlinePanel items={outline} isLoading={isOutlineLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "parsed" ? <ParsedSectionPanel sections={parsedSections} isLoading={parsedSectionsLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "references" ? <ParsedReferencePanel references={parsedReferences} isLoading={parsedReferencesLoading} onJumpToPage={setCurrentPage} onOpenPaper={(targetPaperId) => navigate(`/reader/${targetPaperId}`)} /> : <ParsedElementPanel elements={parsedElements} isLoading={parsedElementsLoading} onJumpToPage={setCurrentPage} />}
       </div>
       <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} />
-      <ReaderSidebar annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} />
+      <ReaderSidebar paperId={paper.id} annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} onAddToNote={setEvidenceAnnotation} />
     </div>
     {editingPaper && <EditPaperDialog paper={paper} onClose={() => setEditingPaper(false)} onDelete={async (target) => { await deletePaper.mutateAsync(target.id); navigate("/library", { replace: true }); }} />}
+    {evidenceAnnotation && <AddAnnotationToNoteDialog annotation={evidenceAnnotation} paperTitle={paper.title} onClose={() => setEvidenceAnnotation(null)} />}
   </div>;
 }
 

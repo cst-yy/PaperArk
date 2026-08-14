@@ -8,13 +8,17 @@ from pydantic import BaseModel
 SearchSource = Literal[
     "title", "abstract", "author", "tag", "keyword", "doi", "arxiv",
     "journal", "conference", "publisher", "section", "chunk", "reference",
-    "figure", "table",
+    "figure", "table", "note_title", "note_content", "research_background",
+    "research_problem", "research_method", "research_contribution",
+    "research_experiment", "research_conclusion", "research_thought",
 ]
 SearchMatchType = Literal["exact", "prefix", "fuzzy", "fulltext"]
 
 
 class SearchHit(BaseModel):
-    paper_id: UUID
+    entity_type: Literal["paper", "note"] = "paper"
+    paper_id: UUID | None = None
+    note_id: UUID | None = None
     document_id: UUID | None = None
     source: SearchSource
     text: str
@@ -44,14 +48,31 @@ class SearchPaperBrief(BaseModel):
 
 
 class SearchPaperResult(BaseModel):
+    entity_type: Literal["paper"] = "paper"
     paper: SearchPaperBrief
     score: float
     match_count: int
     matches: list[SearchMatchResponse]
 
 
+class SearchNoteBrief(BaseModel):
+    id: UUID
+    title: str
+    note_type: Literal["general", "paper", "research"]
+    paper_id: UUID | None = None
+    paper_title: str | None = None
+
+
+class SearchNoteResult(BaseModel):
+    entity_type: Literal["note"] = "note"
+    note: SearchNoteBrief
+    score: float
+    match_count: int
+    matches: list[SearchMatchResponse]
+
+
 class SearchPageResponse(BaseModel):
-    items: list[SearchPaperResult]
+    items: list[SearchPaperResult | SearchNoteResult]
     total: int
     page: int
     page_size: int

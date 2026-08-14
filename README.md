@@ -725,6 +725,36 @@ Provider 将 exact/prefix/fuzzy/fulltext 分数归一化到 0–1；Paper 排序
 
 隔离规模门禁覆盖 100 Papers、1,000 Sections、5,000 Chunks、2,000 References；`EXPLAIN ANALYZE` 脚本位于 `backend/tests/search_explain.sql`。在该小型全内存夹具上 PostgreSQL 可合理选择亚毫秒 Seq Scan；关闭 Seq Scan 的索引资格检查确认 title trigram 以及 Chunk/Section/Reference GIN 谓词均产生 Bitmap Index Scan。
 
+### S9-A：Markdown Note Aggregate
+
+旧 `Note` 表已原位演进：正文唯一事实来源为 `content_markdown`，`paper_id` 可空，`note_type` 限定为 `general | paper | research`。所有 CRUD、详情与 Paper 范围查询均按当前 `user_id` 隔离；关联 Paper 时必须验证所有权。`PUT /api/notes/{id}` 原子保存完整 Note aggregate，同时保留 PATCH 供简单字段更新。
+
+Notes 前端已移除 mock 数据，支持 `/notes`、`/notes/{noteId}` 和 `/papers/{paperId}/notes`。编辑器使用 Markdown source + 安全预览，支持 GFM、行内/块级 KaTeX，默认不执行原始 HTML；内容在停止输入 1 秒后自动保存，并以本地 revision 防止保存途中继续输入导致新内容被旧响应覆盖。S9-A 不包含 Evidence Linking、Structured Research Note 或 Note Search，这些分别留给 S9-B/C/D。
+
+### S9-B：Evidence Linking
+
+新增独立 `NoteEvidence` 关系表，将用户 Annotation 作为唯一 Evidence Anchor。每条关系保存稳定 `order_index` 和首次绑定时的 `quote_snapshot`；Note 与 Annotation 任一方删除都只级联关系，不会删除另一端内容。Paper-scoped Note 只能引用同一 Paper 的 Annotation，General Note 可以引用当前用户不同 Paper 的 Annotation，foreign user Annotation 永远拒绝。
+
+主契约 `PUT /api/notes/{note_id}/evidence` 在任何写入前批量验证全部 ID，按照请求顺序完整替换；重复 ID、foreign Annotation 或跨 Paper Annotation 都会整体失败并保留原集合。Reader 快捷操作使用共享验证 primitive 的幂等 POST/DELETE，`POST /api/notes` 也可携带 `annotation_ids`，实现新建 Paper Note 与首条证据的单事务写入。Note detail 通过 eager-load 一次返回 Evidence 与 Annotation brief，不产生逐 Annotation N+1。
+
+Reader 的已保存 Annotation 卡片新增“添加到笔记”；可选择当前 Paper Note，或新建论文笔记并立即绑定。Note 页面新增 Evidence Panel，可查看类型、页码与快照、移除关系，并复用 `/reader/{paperId}?document_id=...&page=...` 跳回原文。Markdown 自动保存与 Evidence API 相互独立，不会覆盖关系操作。
+
+### S9-C：Structured Research Notes
+
+`research` 类型 Note 现在拥有独立的结构化聚合：`ResearchNoteProfile` 保存研究问题、方法、结论、局限与未来工作，`ResearchContribution` 和 `ResearchExperiment` 分别保存贡献与实验卡片。实验可通过 `ExperimentContribution` 关联其支撑的贡献；贡献和实验只能通过 `ContributionEvidence` / `ExperimentEvidence` 引用当前 Note 已有的 `NoteEvidence`，不会复制或重新定义 Evidence Anchor。
+
+`GET /api/notes/{note_id}/research-profile` 返回当前结构化聚合（未创建时为 `null`），`PUT /api/notes/{note_id}/research-profile` 对 Profile、Contribution、Experiment 及其全部关系执行单事务完整替换。服务会在写入前批量校验 Note 类型、Paper 归属、client ID 引用和 Evidence 归属，任一无效引用都会整体回滚；删除结构化卡片不会删除 NoteEvidence、Annotation 或 Markdown 正文。
+
+Notes 页面为研究笔记提供“正文 / 结构化”双视图。结构化编辑器支持 Profile 字段、贡献与实验卡片、Evidence 选择以及实验到贡献的关联，并沿用 revision-aware 自动保存。Markdown aggregate 与 Research Profile 使用独立 API 和缓存键，保存任一视图都不会覆盖另一视图。
+
+### S9-D：Note Search + Reader Integration
+
+Global Search 的稳定契约已扩展为 `SearchPaperResult | SearchNoteResult`，两类结果分别携带显式 `entity_type`，在 Paper/Note 聚合完成后统一按实体评分、排序和分页。Paper 搜索结果保持原有结构；General、Paper 与 Research Note 始终作为独立 Note result 返回，不会伪装或并入 Paper。Library 的 `GET /api/papers?q=` 契约未改变。
+
+Note 标题和 Markdown 正文使用 `simple` 配置的 generated `tsvector` 与 GIN 索引，结果摘要通过轻量 `normalize_note_search_text()` 去除常见 Markdown/LaTeX 标记。结构化检索覆盖 Profile、Contribution 与 Experiment（包括 datasets、baselines 和 metrics）；来源会细分为研究问题、方法、创新点、实验、结论和我的思考。`NoteEvidence.quote_snapshot` 不作为 Note 正文检索源，避免与 Paper 原文重复命中。所有 provider 都显式通过 `Note.user_id` 隔离。
+
+Search UI 现在区分“论文 / 笔记”实体；结构化命中打开 `/notes/{id}?view=structured`，普通命中打开 Note 正文。Reader 右侧新增当前 Paper 的关联笔记列表，因此双向链路为 `Reader → Note → Evidence → Reader`，但 Reader 不嵌入完整笔记编辑器。
+
 Search 页面已适配 Paper 结果卡、来源徽标、snippet 和 Paper 级分页。可定位的 Section/Chunk/Reference/Figure/Table match 跳转到 `/reader/{paperId}?document_id={documentId}&page={pageStart}`。Reader 仅在当前 Paper scope 初始化时消费一次 URL page，优先级为 URL page → ReadingProgress → Page 1，后续翻页不受 URL 持续控制。
 
 ```bash
@@ -882,8 +912,13 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S8-A | Unified Search Contract + Paper-level Aggregation | ✅ |
 | S8-B | Search Quality + PostgreSQL FTS + pg_trgm + Performance | ✅ |
 | S8 | 全文搜索 | ✅ |
-| S9 | Markdown + LaTeX 笔记 |
-| S10 | Embedding + RAG 基础 |
+| S9-A | User-scoped Note Aggregate + Markdown/LaTeX Editor | ✅ |
+| S9-B | Annotation → NoteEvidence → Note | ✅ |
+| S9-C | Structured Research Notes | ✅ |
+| S9 Core | Markdown + Evidence-backed Structured Research Notes | ✅ |
+| S9-D | Note Search + Reader Integration | ✅ |
+| S9 | Markdown + Evidence-backed Structured Research Notes | ✅ |
+| S10 | Embedding + Semantic / Hybrid Retrieval + RAG Base | 下一步 |
 | S11 | AI Summary + Q&A |
 | S12 | 论文关系 + 知识图谱 |
 

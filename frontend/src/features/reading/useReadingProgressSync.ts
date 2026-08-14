@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import type { PaperReadingStatus } from "@/features/paper/types";
 import { getReadingProgress, upsertReadingProgress } from "./api";
 
 const DEBOUNCE_MS = 1000;
@@ -16,6 +17,7 @@ type UseReadingProgressSyncOptions = {
   documentId?: string;
   currentPage: number;
   totalPages: number;
+  readingStatus?: PaperReadingStatus;
   setCurrentPage: (page: number) => void;
 };
 
@@ -26,6 +28,7 @@ export function useReadingProgressSync({
   documentId,
   currentPage,
   totalPages,
+  readingStatus,
   setCurrentPage,
 }: UseReadingProgressSyncOptions) {
   const queryClient = useQueryClient();
@@ -91,6 +94,16 @@ export function useReadingProgressSync({
       state.statusInvalidatedKey = null;
     };
   }, [paperId, documentId, flush]);
+
+  useEffect(() => {
+    if (readingStatus !== "unread") return;
+    const scope = stateRef.current.scope;
+    if (!scope) return;
+    const key = scopeKey(scope);
+    if (stateRef.current.statusInvalidatedKey === key) {
+      stateRef.current.statusInvalidatedKey = null;
+    }
+  }, [readingStatus]);
 
   useEffect(() => {
     stateRef.current.currentPage = currentPage;

@@ -82,6 +82,14 @@ class DocumentFileNotFoundError(DomainError):
     """Raised when the document record exists but the physical file is missing."""
 
 
+class DocumentParseInProgressError(DomainError):
+    """Raised when a document is already being parsed."""
+
+
+class DocumentParseError(DomainError):
+    """Raised when PDF parsing fails without affecting the source file."""
+
+
 # ── Annotation ──
 
 class AnnotationNotFoundError(DomainError):

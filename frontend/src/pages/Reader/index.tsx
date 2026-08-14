@@ -7,9 +7,15 @@ import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnno
 import type { Annotation, AnnotationColor, NormalizedRect, SelectionContext, UpdateAnnotationInput } from "@/features/annotation/types";
 import { getDocumentFileUrl } from "@/features/paper/api";
 import { EditPaperDialog } from "@/features/paper/components/EditPaperDialog";
-import { useDeletePaper, usePaper, useSetPaperReadingStatus } from "@/features/paper/hooks";
+import { useDeletePaper, usePaper, useParseDocument, useSetPaperReadingStatus } from "@/features/paper/hooks";
 import { useReadingProgressSync } from "@/features/reading/useReadingProgressSync";
 import { OutlinePanel } from "@/features/reader/components/OutlinePanel";
+import { ParsedSectionPanel } from "@/features/reader/components/ParsedSectionPanel";
+import { ParsedReferencePanel } from "@/features/reader/components/ParsedReferencePanel";
+import { ParsedElementPanel } from "@/features/reader/components/ParsedElementPanel";
+import { useParsedElements } from "@/features/reader/parsedElements";
+import { useParsedReferences } from "@/features/reader/parsedReferences";
+import { useParsedSections } from "@/features/reader/parsedSections";
 import { PDFViewer } from "@/features/reader/components/PDFViewer";
 import { ReaderSidebar } from "@/features/reader/components/ReaderSidebar";
 import { ReaderToolbar } from "@/features/reader/components/ReaderToolbar";
@@ -34,21 +40,27 @@ export default function Reader() {
   const [activeAnnotation, setActiveAnnotation] = useState<{ paperId: string; id: string } | null>(null);
   const [areaModeState, setAreaModeState] = useState<{ paperId: string; enabled: boolean } | null>(null);
   const [editingPaper, setEditingPaper] = useState(false);
+  const [outlineMode, setOutlineMode] = useState<"native" | "parsed" | "references" | "elements">("native");
   const activePdf = loadedPdf && loadedPdf.paperId === paperId && loadedPdf.documentId === documentId ? loadedPdf.pdf : null;
   const activeAnnotationId = activeAnnotation && activeAnnotation.paperId === paperId ? activeAnnotation.id : null;
   const areaMode = areaModeState !== null && areaModeState.paperId === paperId && areaModeState.enabled;
   const { outline, isLoading: isOutlineLoading } = usePdfOutline(activePdf);
+  const { data: parsedSections = [], isLoading: parsedSectionsLoading } = useParsedSections(documentId);
+  const { data: parsedReferences = [], isLoading: parsedReferencesLoading } = useParsedReferences(documentId);
+  const { data: parsedElements = [], isLoading: parsedElementsLoading } = useParsedElements(documentId);
   const { data: annotations = [], isLoading: annotationsLoading } = useAnnotations(paperId, documentId);
   const createAnnotation = useCreateAnnotation(paperId ?? "");
   const updateAnnotation = useUpdateAnnotation(paperId ?? "");
   const deleteAnnotation = useDeleteAnnotation(paperId ?? "");
   const deletePaper = useDeletePaper();
   const setReadingStatus = useSetPaperReadingStatus();
+  const parseDocument = useParseDocument();
   const progressSync = useReadingProgressSync({
     paperId,
     documentId,
     currentPage,
     totalPages,
+    readingStatus: paper?.reading_status,
     setCurrentPage,
   });
 
@@ -108,10 +120,22 @@ export default function Reader() {
       onReadingStatusChange={(readingStatus) => {
         if (paperId) setReadingStatus.mutate({ paperId, readingStatus });
       }}
+      parseStatus={activeDocument.parse_status}
+      parseError={activeDocument.parse_error}
+      isParsePending={parseDocument.isPending}
+      onParse={() => parseDocument.mutate(activeDocumentId)}
       onEditPaper={() => setEditingPaper(true)}
     />
     <div className="flex min-h-0 flex-1">
-      <OutlinePanel items={outline} isLoading={isOutlineLoading} activePage={currentPage} onJumpToPage={setCurrentPage} />
+      <div className="flex min-h-0 shrink-0 flex-col">
+        <div className="flex w-64 border-r border-gray-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "native" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("native")}>PDF 目录</button>
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "parsed" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("parsed")}>解析结构</button>
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "references" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("references")}>参考文献</button>
+          <button type="button" className={`flex-1 rounded px-2 py-1 text-xs ${outlineMode === "elements" ? "bg-gray-100 text-gray-900 dark:bg-slate-800 dark:text-gray-100" : "text-gray-500"}`} onClick={() => setOutlineMode("elements")}>图表</button>
+        </div>
+        {outlineMode === "native" ? <OutlinePanel items={outline} isLoading={isOutlineLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "parsed" ? <ParsedSectionPanel sections={parsedSections} isLoading={parsedSectionsLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "references" ? <ParsedReferencePanel references={parsedReferences} isLoading={parsedReferencesLoading} onJumpToPage={setCurrentPage} onOpenPaper={(targetPaperId) => navigate(`/reader/${targetPaperId}`)} /> : <ParsedElementPanel elements={parsedElements} isLoading={parsedElementsLoading} onJumpToPage={setCurrentPage} />}
+      </div>
       <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} />
       <ReaderSidebar annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} />
     </div>

@@ -17,11 +17,19 @@ from app.core.database import get_current_user_id, get_db
 from app.core.exceptions import (
     DocumentFileNotFoundError,
     DocumentNotFoundError,
+    DocumentParseInProgressError,
     StorageError,
 )
 from app.models import Section
-from app.schemas.document import DocumentResponse, SectionResponse
+from app.schemas.document import DocumentElementResponse, DocumentResponse, ElementBBox, MatchedPaperBrief, ReferenceResponse, SectionResponse
+from app.repositories.document_repository import DocumentRepository
+from app.services.document_parse_service import (
+    DocumentParseService,
+    get_document_parse_service,
+)
 from app.services.document_service import DocumentService, get_document_service
+from app.services.document_element_service import DocumentElementService, get_document_element_service
+from app.services.reference_service import ReferenceService, get_reference_service
 
 router = APIRouter()
 
@@ -58,6 +66,34 @@ async def get_document(
 
 # ────────────────────────────── File ────────────────────────────────
 
+@router.get("/{document_id}/parse-status", response_model=DocumentResponse)
+async def get_document_parse_status(
+    document_id: uuid.UUID,
+    service: DocumentParseService = Depends(get_document_parse_service),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return await service.get_parse_status(user_id, document_id)
+    except DocumentNotFoundError as e:
+        raise _handle_doc_error(e)
+
+
+@router.post("/{document_id}/parse", response_model=DocumentResponse)
+async def parse_document(
+    document_id: uuid.UUID,
+    service: DocumentParseService = Depends(get_document_parse_service),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return await service.parse_document(user_id, document_id)
+    except DocumentParseInProgressError as e:
+        raise HTTPException(status_code=409, detail=e.message)
+    except (DocumentNotFoundError, DocumentFileNotFoundError) as e:
+        raise _handle_doc_error(e)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"PDF 解析失败: {e}")
+
+
 @router.get("/{document_id}/file")
 async def get_document_file(
     document_id: uuid.UUID,
@@ -93,8 +129,12 @@ async def get_document_file(
 async def get_sections(
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
 ):
-    """Get the section tree (table of contents) for a document."""
+    """Get the parsed section tree for a user-owned document."""
+    document = await DocumentRepository(db).get_by_id(document_id, user_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
     stmt = (
         select(Section)
         .where(Section.document_id == document_id)
@@ -103,30 +143,82 @@ async def get_sections(
     result = await db.execute(stmt)
     sections = result.scalars().all()
 
-    # Build tree
-    section_map: dict[uuid.UUID, SectionResponse] = {}
-    roots: list[SectionResponse] = []
-
-    for s in sections:
-        resp = SectionResponse(
-            id=s.id,
-            document_id=s.document_id,
-            parent_id=s.parent_id,
-            title=s.title,
-            section_type=s.section_type,
-            level=s.level,
-            page_start=s.page_start,
-            page_end=s.page_end,
-            order_index=s.order_index,
+    return [
+        SectionResponse(
+            id=section.id,
+            document_id=section.document_id,
+            parent_id=section.parent_id,
+            title=section.title,
+            section_type=section.section_type,
+            level=section.level,
+            page_start=section.page_start,
+            page_end=section.page_end,
+            order_index=section.order_index,
+            raw_text=section.content,
             children=[],
         )
-        section_map[s.id] = resp
+        for section in sections
+    ]
 
-    for s in sections:
-        resp = section_map[s.id]
-        if s.parent_id and s.parent_id in section_map:
-            section_map[s.parent_id].children.append(resp)
-        else:
-            roots.append(resp)
 
-    return roots
+@router.get("/{document_id}/elements", response_model=list[DocumentElementResponse])
+async def get_document_elements(
+    document_id: uuid.UUID,
+    element_type: str | None = None,
+    service: DocumentElementService = Depends(get_document_element_service),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    """Get PDF-derived figure/table metadata for a user-owned document."""
+    if element_type is not None and element_type not in {"figure", "table"}:
+        raise HTTPException(status_code=422, detail="element_type must be figure or table")
+    elements = await service.list_for_document(user_id, document_id, element_type)
+    if elements is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return [
+        DocumentElementResponse(
+            id=element.id, document_id=element.document_id, section_id=element.section_id,
+            element_type=element.element_type, order_index=element.order_index,
+            page_number=element.page_number, label=element.label, caption=element.caption,
+            raw_text=element.raw_text,
+            bbox=(ElementBBox(x=element.x, y=element.y, width=element.width, height=element.height)
+                  if element.x is not None else None),
+            source=element.source, confidence=element.confidence,
+        )
+        for element in elements
+    ]
+
+
+@router.get("/{document_id}/references", response_model=list[ReferenceResponse])
+async def get_references(
+    document_id: uuid.UUID,
+    service: ReferenceService = Depends(get_reference_service),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    """Get PDF-derived references for a user-owned document."""
+    references = await service.list_for_document(user_id, document_id)
+    if references is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return [
+        ReferenceResponse(
+            id=reference.id,
+            document_id=reference.document_id,
+            section_id=reference.section_id,
+            order_index=reference.order_index,
+            raw_text=reference.raw_text,
+            title=reference.title,
+            authors=reference.authors_json,
+            year=reference.year,
+            doi=reference.doi,
+            arxiv_id=reference.arxiv_id,
+            venue=reference.venue,
+            page_start=reference.page_start,
+            page_end=reference.page_end,
+            matched_paper=(
+                MatchedPaperBrief(id=reference.matched_paper.id, title=reference.matched_paper.title)
+                if reference.matched_paper else None
+            ),
+            match_method=reference.match_method,
+            match_confidence=reference.match_confidence,
+        )
+        for reference in references
+    ]

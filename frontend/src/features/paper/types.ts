@@ -1,5 +1,6 @@
 export type PaperProcessingStatus = "imported" | "processing" | "ready" | "failed";
 export type PaperReadingStatus = "unread" | "reading" | "finished" | "archived";
+export type DocumentParseStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface Author {
   id?: string;
@@ -33,7 +34,10 @@ export interface DocumentBrief {
   original_filename: string | null;
   file_size: number | null;
   mime_type: string | null;
-  parse_status: string;
+  parse_status: DocumentParseStatus;
+  parse_error?: string | null;
+  parsed_at?: string | null;
+  parser_version?: string | null;
 }
 
 export interface Paper {

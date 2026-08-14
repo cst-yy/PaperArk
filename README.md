@@ -227,6 +227,17 @@ except Exception:
 
 上传服务在 `commit()` 成功前不会返回。任何创建、flush 或最终 commit 失败都会回滚数据库并清理刚写入的 PDF，避免孤儿文件。
 
+### S7-A：PDF Parser Pipeline & Parse State
+
+迁移 `d3f7a2e9c5b4_document_parser_lifecycle` 将 Document 解析状态统一为 `pending | processing | ready | failed`，并新增 `parser_version`、`ix_documents_parse_status` 与数据库 CHECK 约束。
+
+```text
+POST /api/documents/{document_id}/parse
+GET  /api/documents/{document_id}/parse-status
+```
+
+解析服务会先执行用户归属校验，再用条件更新阻止同一 Document 并发解析；PyMuPDF 使用 `page.get_text("text")` 提取页级文本、尺寸与扫描页 warning。S7-A 仅更新 Document 的页数、状态、错误、解析时间与 parser version：不会修改原 PDF、`Document.file_path`、Paper metadata、Section 或 Chunk。失败会保留源文件和任何未来派生数据，并可调用同一 endpoint 重试。上传完成后前端会异步发起解析，不阻塞上传响应；Reader 显示解析状态，并在待解析或失败时提供触发/重试入口。
+
 ---
 
 ## 数据库迁移与质量检查
@@ -657,6 +668,47 @@ reading_status    = unread / reading / finished / archived
 
 迁移 `a9d4e7b2c6f1_annotation_document_anchor_alignment` 以 fail-fast 方式收紧 Evidence Anchor 的数据库约束：先检查空 `document_id` 和错误的 Paper/Document 配对，只有数据完整时才将 `annotations.document_id` 对齐为 `NOT NULL`、`FOREIGN KEY ... ON DELETE CASCADE` 并创建 `ix_annotations_document_id`。不修改历史迁移，不会猜测回填或静默删除标注数据。
 
+### S7-A：PDF Parser Pipeline & Parse State
+
+迁移 `d3f7a2e9c5b4_document_parser_lifecycle` 将 Document 解析状态统一为 `pending | processing | ready | failed`，并新增 `parser_version`、`ix_documents_parse_status` 与数据库 CHECK 约束。
+
+```text
+POST /api/documents/{document_id}/parse
+GET  /api/documents/{document_id}/parse-status
+```
+
+解析服务会先执行用户归属校验，再用条件更新阻止同一 Document 并发解析；PyMuPDF 使用 `page.get_text("text")` 提取页级文本、尺寸与扫描页 warning。S7-A 仅更新 Document 的页数、状态、错误、解析时间与 parser version：不会修改原 PDF、`Document.file_path`、Paper metadata、Section 或 Chunk。失败会保留源文件和任何未来派生数据，并可调用同一 endpoint 重试。上传完成后前端会异步发起解析，不阻塞上传响应；Reader 显示解析状态，并在待解析或失败时提供触发/重试入口。
+
+### S7-B：Section + Section-aware Chunk
+
+迁移 `e4b8c6a1f9d3_structured_document_derivatives` 演进既有 `sections`/`chunks` 表，不创建 v2 表：Section 增加时间字段，Chunk 增加 `page_start/page_end/char_count`，并以 `(document_id, chunk_index)` 保证文档内顺序唯一。解析服务现在采用：
+
+```text
+PDF → ParsedDocument（含 text spans）
+   → SectionDetector（保守标题、层级、页码、Full Text fallback）
+   → SectionChunker（段落感知、章节边界、页码追踪）
+   → validate
+   → 原子替换旧 Section/Chunk
+```
+
+`GET /api/documents/{document_id}/sections` 返回扁平、稳定顺序且经过用户隔离的 Section 列表；Chunk 暂不公开 API。Reader 左侧提供“PDF 目录 / 解析结构”切换，可跳转到 Section 起始页。无文本扫描 PDF 不产生空 Chunk；解析失败或派生数据校验失败不会删除旧结构。S7-B 不处理 Reference、Figure/Table，也不修改 Paper metadata。
+
+### S7-C：Reference Extraction
+
+迁移 `f6c2a9e7b4d1_document_references` 增加 PDF 派生 `Reference`：它严格归属于 `Document`，不会自动创建 Library Paper。`document_id` 使用 `ON DELETE CASCADE`，可选的 `matched_paper_id` 使用 `ON DELETE SET NULL`；`UNIQUE(document_id, order_index)` 防止重解析累积。
+
+解析器只消费已识别的 `references` Section，不扫描 References 之后的 Appendix 或 checklist。分段支持编号、多行、跨页条目及无编号 author-year fallback；DOI/arXiv 优先规范化提取，title/authors/year/venue 均为 best-effort，无法可靠识别时保持空值。库内匹配仅按当前用户范围执行 DOI exact → arXiv exact → normalized title exact，不创建 `PaperRelation`。
+
+`DerivedDocumentSnapshot` 统一包含 Sections、Chunks、References；三者先在内存校验，再在同一事务中 child-first 替换。`GET /api/documents/{document_id}/references` 经过 Document → Paper → current user 归属校验，Reader 左侧“参考文献”入口支持跳转来源页和打开已匹配的库内论文。
+
+### S7-D：Figure / Table Metadata Extraction
+
+迁移 `a7d3f9c2e5b6_document_elements` 增加统一的 PDF 派生 `DocumentElement`，第一版仅允许 `figure | table`。每个元素保存文档级稳定顺序、页码、可选 Section、label、caption、raw_text、来源与置信度；`UNIQUE(document_id, order_index)` 防重复。bbox 使用 Annotation 一致的 normalized `x/y/width/height` 协议；无法可靠定位视觉区域时四项都为 `NULL`，不会生成整页框。
+
+ElementDetector 采用 caption-first 策略：识别 Figure/Fig./Table/图/表，合并邻近的多行 caption，并以 PDF image/vector 几何信息作为 Figure 向上、Table 向下的可选 bbox 证据。章节编号与新 caption 会终止合并，避免正文标题污染 caption。它不执行 OCR、AI 解释、表格单元格还原、图片裁剪，也不自动创建用户 Annotation。
+
+Elements 纳入同一 `DerivedDocumentSnapshot`，替换顺序为 Elements → References → Chunks → Sections，再插入新快照；任一检测或校验异常都会保留旧快照。`GET /api/documents/{document_id}/elements?element_type=figure|table` 经过用户隔离，Reader “图表”入口按 Figures/Tables 展示并跳转页码。
+
 ```bash
 # 读取指定 PDF 的已保存进度
 curl "http://localhost:8000/api/papers/<paper_id>/reading-progress?document_id=<document_id>"
@@ -804,7 +856,11 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S6-B | Recent Reading + Continue Reading | ✅ |
 | S6-C | Reading Status（unread / reading / finished / archived） | ✅ |
 | S6 | Reading Workflow | ✅ |
-| S7 | PDF Parser + Section + Chunk |
+| S7-A | PDF Parser Pipeline + Parse State | ✅ |
+| S7-B | Section + Paragraph-aware Chunk + Atomic Replacement | ✅ |
+| S7-C | Reference Extraction | ✅ |
+| S7-D | Figure / Table Metadata | ✅ |
+| S7 | PDF Parser + Section + Chunk + Reference / Figure / Table Extraction | ✅ |
 | S8 | 全文搜索 |
 | S9 | Markdown + LaTeX 笔记 |
 | S10 | Embedding + RAG 基础 |

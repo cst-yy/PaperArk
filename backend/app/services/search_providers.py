@@ -206,6 +206,7 @@ class NoteSearchProvider:
             ("research_conclusion", ResearchNoteProfile.results_summary, 0.7),
             ("research_conclusion", ResearchNoteProfile.conclusion, 0.7),
             ("research_conclusion", ResearchNoteProfile.limitations, 0.7),
+            ("research_conclusion", ResearchNoteProfile.future_work, 0.7),
             ("research_thought", ResearchNoteProfile.my_thoughts, 0.7),
         )
         for source, column, score in profile_fields:

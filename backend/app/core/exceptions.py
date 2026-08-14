@@ -114,3 +114,11 @@ class SemanticRetrievalError(DomainError):
 
 class RAGContextError(DomainError):
     """Raised when a RAG context scope is invalid or inaccessible."""
+
+
+class GenerationProviderError(DomainError):
+    """Raised when grounded generation is unavailable or returns an invalid response."""
+
+
+class StructuredGenerationError(DomainError):
+    """Raised when deep-reading output cannot satisfy the strict draft contract."""

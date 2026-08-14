@@ -26,7 +26,7 @@ class ResearchNoteService:
         profile = await self._profile(note_id)
         if not profile:
             profile = ResearchNoteProfile(note_id=note_id); self.db.add(profile); await self.db.flush()
-        for field in ("background","prior_work_limitations","research_problem","method_summary","results_summary","conclusion","limitations","my_thoughts"): setattr(profile, field, getattr(data, field))
+        for field in ("background","prior_work_limitations","research_problem","method_summary","results_summary","conclusion","limitations","future_work","my_thoughts"): setattr(profile, field, getattr(data, field))
         await self.db.execute(delete(ResearchContribution).where(ResearchContribution.research_note_id == profile.id))
         await self.db.execute(delete(ResearchExperiment).where(ResearchExperiment.research_note_id == profile.id))
         await self.db.flush()
@@ -49,6 +49,6 @@ class ResearchNoteService:
         return await self.db.scalar(select(ResearchNoteProfile).where(ResearchNoteProfile.note_id == note_id).options(selectinload(ResearchNoteProfile.contributions).selectinload(ResearchContribution.evidence_links), selectinload(ResearchNoteProfile.experiments).selectinload(ResearchExperiment.evidence_links), selectinload(ResearchNoteProfile.experiments).selectinload(ResearchExperiment.contribution_links)))
     @staticmethod
     def _response(profile: ResearchNoteProfile) -> ResearchProfileResponse:
-        return ResearchProfileResponse(id=profile.id,note_id=profile.note_id,background=profile.background,prior_work_limitations=profile.prior_work_limitations,research_problem=profile.research_problem,method_summary=profile.method_summary,results_summary=profile.results_summary,conclusion=profile.conclusion,limitations=profile.limitations,my_thoughts=profile.my_thoughts,created_at=profile.created_at,updated_at=profile.updated_at,
+        return ResearchProfileResponse(id=profile.id,note_id=profile.note_id,background=profile.background,prior_work_limitations=profile.prior_work_limitations,research_problem=profile.research_problem,method_summary=profile.method_summary,results_summary=profile.results_summary,conclusion=profile.conclusion,limitations=profile.limitations,future_work=profile.future_work,my_thoughts=profile.my_thoughts,created_at=profile.created_at,updated_at=profile.updated_at,
             contributions=[ContributionResponse(id=x.id,order_index=x.order_index,problem=x.problem,prior_limitation=x.prior_limitation,innovation=x.innovation,solution=x.solution,evidence_summary=x.evidence_summary,evidence_ids=[v.note_evidence_id for v in x.evidence_links]) for x in profile.contributions],
             experiments=[ExperimentResponse(id=x.id,order_index=x.order_index,task=x.task,datasets=x.datasets_json,baselines=x.baselines_json,metrics=x.metrics_json,result=x.result,conclusion=x.conclusion,evidence_ids=[v.note_evidence_id for v in x.evidence_links],contribution_ids=[v.contribution_id for v in x.contribution_links]) for x in profile.experiments])

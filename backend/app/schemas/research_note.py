@@ -17,7 +17,7 @@ class ExperimentInput(BaseModel):
 
 class ResearchProfileAggregate(BaseModel):
     background: str = ""; prior_work_limitations: str = ""; research_problem: str = ""; method_summary: str = ""
-    results_summary: str = ""; conclusion: str = ""; limitations: str = ""; my_thoughts: str = ""
+    results_summary: str = ""; conclusion: str = ""; limitations: str = ""; future_work: str = ""; my_thoughts: str = ""
     contributions: list[ContributionInput] = Field(default_factory=list)
     experiments: list[ExperimentInput] = Field(default_factory=list)
     @model_validator(mode="after")
@@ -37,5 +37,5 @@ class ExperimentResponse(BaseModel):
     id: UUID; order_index: int; task: str; datasets: list[str]; baselines: list[str]; metrics: list[str]; result: str; conclusion: str
     contribution_ids: list[UUID]; evidence_ids: list[UUID]
 class ResearchProfileResponse(BaseModel):
-    id: UUID; note_id: UUID; background: str; prior_work_limitations: str; research_problem: str; method_summary: str; results_summary: str; conclusion: str; limitations: str; my_thoughts: str
+    id: UUID; note_id: UUID; background: str; prior_work_limitations: str; research_problem: str; method_summary: str; results_summary: str; conclusion: str; limitations: str; future_work: str; my_thoughts: str
     contributions: list[ContributionResponse]; experiments: list[ExperimentResponse]; created_at: datetime; updated_at: datetime

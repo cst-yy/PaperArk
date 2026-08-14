@@ -787,6 +787,48 @@ RAG retrieval 直接复用 PostgreSQL FTS、pgvector 与 RRF 公式，但融合�
 
 纯 Python `RAGContextAssembler` 负责稳定去重、同 Document/Section 的保守相邻 Chunk window 合并、禁止跨 Section 合并、Library-wide Paper 多样性、最多 2 个 Note、单来源 cap、总 token budget 和确定性 formatter。Token 为近似估算，并包含 provenance header 开销；截断会同时标记 source 与整个 context。格式明确使用 `[SOURCE n | PAPER]` / `[SOURCE n | NOTE]`，防止后续模型混淆论文证据和用户解释。
 
+### S11-A：AI Provider + Grounded Answer Contract
+
+新增与业务 Service 解耦的 `GenerationProvider` 协议和 OpenAI-compatible HTTP 实现。生成配置独立使用 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL`、`AI_MAX_OUTPUT_TOKENS` 与 `AI_TEMPERATURE`，不会复用或持久化 Embedding 密钥；测试全部使用 fake provider，不访问真实模型 API。
+
+`AIService` 现在严格执行 `User Query → RAGContext → GroundedPromptBuilder → GenerationProvider → CitationValidator → AIAnswer`。模型上下文只暴露稳定的 `[S1]` 编号并明确区分 PAPER 原文与 NOTE 用户解释，不暴露 `source_key`、Document ID 或页码等可信元数据。生成后端只解析上下文中存在的编号，删除非法引用，并从原始 `RAGSource` 回填 citation provenance；出现伪造编号、缺少有效引用或模型声明证据不足时，结果不会被标记为 grounded。
+
+当前 S11-A 只建立单轮 grounded generation 内核，不开放 Paper Q&A、翻译、聊天历史、streaming、Agent、外部搜索或自动写入 Research Note。空 RAG context 会直接返回 `insufficient_evidence=true`，不会调用模型；Provider 未配置、网络失败或响应格式错误会抛出明确的 `GenerationProviderError`。
+
+### S11-B：Paper Q&A + Selection Translation
+
+`POST /api/ai/qa` 接收 `paper_id`、问题和 retrieval 参数。`AIService.answer_paper_question()` 先按当前用户验证 Paper ownership，再在服务内部强制构造带 `paper_id` 的 RAG request；因此候选只包含该论文 Chunk 及其 Paper/Research Note Markdown，不包含 General Note、其他论文或其他用户数据。响应复用 S11-A `AIAnswer/AICitation`，并增加 Paper/Query identity；citation 按回答中首次出现顺序去重，可信 label、标题、Document/Note、Section 与页码全部由后端 provenance 回填。`grounded=true` 仅表示回答含合法引用、没有非法引用且未声明证据不足，并不代表逐句 NLI 验证。
+
+Reader 右栏现为“批注 / 笔记 / AI”。AI tab 提供 single-turn Paper Q&A、安全 Markdown/GFM/KaTeX 渲染与 citation chip/card；不启用 raw HTML，不保存 Conversation/Message。Paper citation 跳回可信 Document/Page，Note citation 打开对应 Note。相同 Paper 内跳页直接更新 Reader state，不依赖模型正文中的页码描述。
+
+`POST /api/ai/translate` 是独立的 selection translation contract，只接收 1–8000 字符文本和 `zh-CN | en` 目标语言，不调用 RAG 或 GroundedPromptBuilder。翻译 Prompt 要求忠实保留 LaTeX、数学符号、模型/数据集名、引用编号和缩写，并将输入视为数据而非指令。Reader 选区工具栏的“翻译”会打开 AI tab 显示临时结果；不会自动创建 Annotation、写 Note 或持久化翻译。两个接口当前均为完整 JSON 响应，不包含 streaming 或聊天历史；Provider 故障对外统一为不暴露密钥、URL 或 upstream body 的 503。
+
+```bash
+curl -X POST http://localhost:8000/api/ai/qa \
+  -H "Content-Type: application/json" \
+  -d '{"paper_id":"<uuid>","query":"这篇论文解决了什么问题？","retrieval_mode":"hybrid","max_sources":8,"token_budget":6000}'
+
+curl -X POST http://localhost:8000/api/ai/translate \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Federated learning...","target_language":"zh-CN"}'
+```
+
+### S11-C：Deep Reading Structured Analysis
+
+新增 `POST /api/ai/deep-reading`，返回与 S9-C 数据语义对齐但不持久化的 `DeepReadingDraft`。Draft 覆盖 background、prior-work limitations、research problem、method、results、conclusion、limitations、future work、Contributions 与 Experiments；`my_thoughts` 明确保留为用户判断，不属于 AI 输出。为补齐实际 S9-C aggregate 与 Draft 的语义差异，迁移 `d8f1a6c3e9b2` 在既有 `ResearchNoteProfile` 上增加 `future_work`，并同步保存、读取、编辑与结构化搜索，不创建第二套研究笔记表。
+
+`DeepReadingRetrievalService` 使用后端固定的 8 类 research intents 覆盖背景/问题、方法、创新、实验、结果、局限/未来工作与结论。每个 intent 均为当前用户、当前 Paper scope；union 后只保留 Paper Chunk，明确排除 Paper/Research/General Note。候选按 intent round-robin、source key 去重并施加 Section cap，最终使用最多 20 个来源和 12000 estimated-token budget，避免单一 Section 吞掉完整上下文。
+
+结构生成只接受严格 JSON。`DeepReadingPayload` 使用 Pydantic forbidden-extra 校验，重复 Contribution/Experiment client ID 或 Experiment 指向未知 Contribution 会使整个 Draft 失败；无效 JSON 最多执行一次“不新增内容”的 constrained repair。`StructuredEvidenceValidator` 对每个字段和卡片独立验证 `S#`，去重合法引用、删除非法引用并重新计算 grounded/insufficient；完全空的 Contribution/Experiment 会被丢弃。模型不能输出数据库 ID，可信 AI Source metadata 仍由当前 `RAGSource` 回填。
+
+Reader AI tab 可生成并审阅临时 Deep Reading Draft，按字段、创新点和实验展示 grounded 状态与可跳转 AI Source。生成本身不创建 Note、不修改 Research Profile、不创建 Annotation/NoteEvidence。用户点击“确认并应用”后，前端才调用既有 S9-C Note/Profile API：可显式新建或选择 Research Note，默认只填空标量、只应用 grounded 项并 append 卡片；覆盖已有标量或 replace-all 卡片必须明确选择。Apply 只写结构文本，AI Source 保持 provenance-only，`evidence_ids=[]`，`my_thoughts` 永远保留。
+
+```bash
+curl -X POST http://localhost:8000/api/ai/deep-reading \
+  -H "Content-Type: application/json" \
+  -d '{"paper_id":"<uuid>","retrieval_mode":"hybrid"}'
+```
+
 Search 页面已适配 Paper 结果卡、来源徽标、snippet 和 Paper 级分页。可定位的 Section/Chunk/Reference/Figure/Table match 跳转到 `/reader/{paperId}?document_id={documentId}&page={pageStart}`。Reader 仅在当前 Paper scope 初始化时消费一次 URL page，优先级为 URL page → ReadingProgress → Page 1，后续翻页不受 URL 持续控制。
 
 ```bash
@@ -890,7 +932,15 @@ curl -X PUT "http://localhost:8000/api/papers/<paper_id>/reading-progress" \
 | `STORAGE_DIR` | `./storage` | 文件存储目录 |
 | `MAX_UPLOAD_SIZE_MB` | `100` | PDF 上传最大大小 (MB) |
 | `SECRET_KEY` | `change-this-in-production` | JWT 密钥 |
-| `OPENAI_API_KEY` | (空) | AI / Embedding 用 |
+| `AI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible Generation API 地址 |
+| `AI_API_KEY` | (空) | Generation API 密钥，不写入数据库或备份 |
+| `AI_MODEL` | `gpt-4o-mini` | Generation 模型名 |
+| `AI_MAX_OUTPUT_TOKENS` | `1200` | 单次 grounded generation 最大输出 token |
+| `AI_TEMPERATURE` | `0.1` | grounded generation 温度 |
+| `DEEP_READING_CONTEXT_BUDGET` | `12000` | Deep Reading 上下文 estimated-token 预算 |
+| `DEEP_READING_MAX_SOURCES` | `20` | Deep Reading 最多 Paper Chunk 来源数 |
+| `DEEP_READING_SECTION_SOURCE_CAP` | `4` | 单个 Section 的候选来源上限 |
+| `DEEP_READING_MAX_OUTPUT_TOKENS` | `4000` | 结构化 Draft 最大输出 token |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | 向量模型 |
 | `CHUNK_SIZE` | `512` | PDF 分块大小 |
 | `CHUNK_OVERLAP` | `64` | 分块重叠 |
@@ -972,7 +1022,11 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S10-C | Hybrid Retrieval + RRF | ✅ |
 | S10-D | RAG Context Assembly | ✅ |
 | S10 | Semantic / Hybrid Retrieval + RAG Base | ✅ |
-| S11 | AI Deep Reading | 下一步 |
+| S11-A | AI Provider + Grounded Answer Contract | ✅ |
+| S11-B | Paper Q&A + Selection Translation | ✅ |
+| S11-C | Deep Reading Structured Analysis + Explicit Apply | ✅ |
+| S11-D | AI Result Provenance + Apply Workflow Hardening | 下一步 |
+| S11 | AI Deep Reading | 进行中 |
 | S12 | 论文关系 + 知识图谱 |
 
 ---

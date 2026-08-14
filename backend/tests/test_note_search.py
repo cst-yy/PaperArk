@@ -27,7 +27,7 @@ async def test_note_search_covers_markdown_and_structured_sources(session: Async
     await session.flush()
     profile = ResearchNoteProfile(note_id=note.id, background="backgroundterm",
         research_problem="problemterm", method_summary="methodterm",
-        conclusion="conclusionterm", my_thoughts="thoughtterm")
+        conclusion="conclusionterm", future_work="futureworkterm", my_thoughts="thoughtterm")
     session.add(profile)
     await session.flush()
     session.add(ResearchContribution(research_note_id=profile.id, order_index=0,
@@ -40,7 +40,8 @@ async def test_note_search_covers_markdown_and_structured_sources(session: Async
     expected = {
         "titleterm": "note_title", "markdownterm": "note_content",
         "problemterm": "research_problem", "innovationterm": "research_contribution",
-        "DatasetUnique": "research_experiment", "thoughtterm": "research_thought",
+        "DatasetUnique": "research_experiment", "futureworkterm": "research_conclusion",
+        "thoughtterm": "research_thought",
     }
     for query, source in expected.items():
         result = await SearchService(session).search(owner.id, query)

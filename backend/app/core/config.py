@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # AI / Embedding
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    AI_BASE_URL: str = "https://api.openai.com/v1"
+    AI_API_KEY: str = ""
+    AI_MODEL: str = "gpt-4o-mini"
+    AI_MAX_OUTPUT_TOKENS: int = 1200
+    AI_TEMPERATURE: float = 0.1
     EMBEDDING_BASE_URL: str = "https://api.openai.com/v1"
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL: str = "text-embedding-3-small"
@@ -42,6 +47,10 @@ class Settings(BaseSettings):
     RAG_MAX_NOTE_SOURCE_TOKENS: int = 1000
     RAG_MAX_NOTE_SOURCES: int = 2
     RAG_MAX_PAPER_SOURCES_PER_PAPER: int = 4
+    DEEP_READING_CONTEXT_BUDGET: int = 12000
+    DEEP_READING_MAX_SOURCES: int = 20
+    DEEP_READING_SECTION_SOURCE_CAP: int = 4
+    DEEP_READING_MAX_OUTPUT_TOKENS: int = 4000
 
     # PDF Processing
     CHUNK_SIZE: int = 512

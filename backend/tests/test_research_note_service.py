@@ -19,13 +19,13 @@ async def setup(session: AsyncSession):
     return user,other,note
 
 def payload(evidence_ids):
-    return ResearchProfileAggregate(background="background",research_problem="problem",method_summary="method",contributions=[ContributionInput(client_id="c1",problem="p",prior_limitation="l",innovation="i",solution="s",evidence_ids=[evidence_ids[0]])],experiments=[ExperimentInput(client_id="e1",task="classification",datasets=["CIFAR-10"],baselines=["FedAvg"],metrics=["Accuracy"],result="better",conclusion="supports",supports_contribution_client_ids=["c1"],evidence_ids=[evidence_ids[1]])])
+    return ResearchProfileAggregate(background="background",research_problem="problem",method_summary="method",future_work="extend to new domains",contributions=[ContributionInput(client_id="c1",problem="p",prior_limitation="l",innovation="i",solution="s",evidence_ids=[evidence_ids[0]])],experiments=[ExperimentInput(client_id="e1",task="classification",datasets=["CIFAR-10"],baselines=["FedAvg"],metrics=["Accuracy"],result="better",conclusion="supports",supports_contribution_client_ids=["c1"],evidence_ids=[evidence_ids[1]])])
 
 @pytest.mark.asyncio
 async def test_research_profile_aggregate_roundtrip_and_structure_deletion(session: AsyncSession):
     user,_,note=await setup(session); evidence=[x.id for x in note.evidence]
     saved=await ResearchNoteService(session).save(user.id,note.id,payload(evidence))
-    assert saved.background=="background" and saved.contributions[0].evidence_ids==[evidence[0]]
+    assert saved.background=="background" and saved.future_work=="extend to new domains" and saved.contributions[0].evidence_ids==[evidence[0]]
     assert saved.experiments[0].datasets==["CIFAR-10"] and saved.experiments[0].contribution_ids==[saved.contributions[0].id]
     empty=payload(evidence); empty.contributions=[]; empty.experiments=[]
     result=await ResearchNoteService(session).save(user.id,note.id,empty)

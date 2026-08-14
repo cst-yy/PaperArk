@@ -22,6 +22,7 @@ class ResearchNoteProfile(Base):
     results_summary: Mapped[str] = mapped_column(Text, default="", server_default="")
     conclusion: Mapped[str] = mapped_column(Text, default="", server_default="")
     limitations: Mapped[str] = mapped_column(Text, default="", server_default="")
+    future_work: Mapped[str] = mapped_column(Text, default="", server_default="")
     my_thoughts: Mapped[str] = mapped_column(Text, default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

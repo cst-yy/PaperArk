@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import { translateSelection } from "@/features/ai/api";
+import type { AICitation, TargetLanguage, TranslationResult } from "@/features/ai/types";
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from "@/features/annotation/hooks";
 import type { Annotation, AnnotationColor, NormalizedRect, SelectionContext, UpdateAnnotationInput } from "@/features/annotation/types";
 import { getDocumentFileUrl } from "@/features/paper/api";
@@ -18,14 +20,15 @@ import { useParsedElements } from "@/features/reader/parsedElements";
 import { useParsedReferences } from "@/features/reader/parsedReferences";
 import { useParsedSections } from "@/features/reader/parsedSections";
 import { PDFViewer } from "@/features/reader/components/PDFViewer";
-import { ReaderSidebar } from "@/features/reader/components/ReaderSidebar";
+import { ReaderSidebar, type ReaderSideTab } from "@/features/reader/components/ReaderSidebar";
 import { ReaderToolbar } from "@/features/reader/components/ReaderToolbar";
 import { usePdfOutline } from "@/features/reader/hooks/usePdfOutline";
 import { useReaderStore } from "@/stores/readerStore";
 
 export default function Reader() {
   const { paperId } = useParams<{ paperId: string }>();
-  return <ReaderContent key={paperId} />;
+  const [searchParams] = useSearchParams();
+  return <ReaderContent key={`${paperId}:${searchParams.get("document_id") ?? ""}:${searchParams.get("page") ?? ""}`} />;
 }
 
 function ReaderContent() {
@@ -56,6 +59,8 @@ function ReaderContent() {
   const [editingPaper, setEditingPaper] = useState(false);
   const [evidenceAnnotation, setEvidenceAnnotation] = useState<Annotation | null>(null);
   const [outlineMode, setOutlineMode] = useState<"native" | "parsed" | "references" | "elements">("native");
+  const [sideTab, setSideTab] = useState<ReaderSideTab>("annotations");
+  const [translationState, setTranslationState] = useState<{ text: string | null; targetLanguage: TargetLanguage; result: TranslationResult | null; pending: boolean; error: string | null }>({ text: null, targetLanguage: "zh-CN", result: null, pending: false, error: null });
   const activePdf = loadedPdf && loadedPdf.paperId === paperId && loadedPdf.documentId === documentId ? loadedPdf.pdf : null;
   const activeAnnotationId = activeAnnotation && activeAnnotation.paperId === paperId ? activeAnnotation.id : null;
   const areaMode = areaModeState !== null && areaModeState.paperId === paperId && areaModeState.enabled;
@@ -127,6 +132,37 @@ function ReaderContent() {
     window.setTimeout(() => setActiveAnnotation((current) => current?.id === annotation.id ? null : current), 1100);
   };
   const updateAnnotationComment = (annotationId: string, input: UpdateAnnotationInput) => updateAnnotation.mutate({ annotationId, input });
+  const runTranslation = async (text: string, targetLanguage: TargetLanguage) => {
+    setSideTab("ai");
+    setTranslationState({ text, targetLanguage, result: null, pending: true, error: null });
+    try {
+      const result = await translateSelection({ text, targetLanguage });
+      setTranslationState((current) => current.text === text ? { ...current, result, pending: false } : current);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "AI 服务暂时不可用，请稍后重试。";
+      setTranslationState((current) => current.text === text ? { ...current, error: message, pending: false } : current);
+    }
+  };
+  const handleTranslateSelection = (text: string) => {
+    const targetLanguage: TargetLanguage = /[\u4e00-\u9fff]/.test(text) ? "en" : "zh-CN";
+    void runTranslation(text, targetLanguage);
+  };
+  const openCitation = (citation: AICitation) => {
+    if (citation.source_type === "note" && citation.note_id) {
+      navigate(`/notes/${citation.note_id}`);
+      return;
+    }
+    const targetPaperId = citation.paper_id ?? paper.id;
+    const params = new URLSearchParams();
+    if (citation.document_id) params.set("document_id", citation.document_id);
+    if (citation.page_start) params.set("page", String(citation.page_start));
+    const target = `/reader/${targetPaperId}${params.size ? `?${params.toString()}` : ""}`;
+    if (targetPaperId === paper.id && (!citation.document_id || citation.document_id === activeDocumentId) && citation.page_start) {
+      setCurrentPage(citation.page_start);
+    } else {
+      navigate(target);
+    }
+  };
 
   return <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-white dark:bg-slate-900">
     <ReaderToolbar
@@ -152,8 +188,8 @@ function ReaderContent() {
         </div>
         {outlineMode === "native" ? <OutlinePanel items={outline} isLoading={isOutlineLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "parsed" ? <ParsedSectionPanel sections={parsedSections} isLoading={parsedSectionsLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "references" ? <ParsedReferencePanel references={parsedReferences} isLoading={parsedReferencesLoading} onJumpToPage={setCurrentPage} onOpenPaper={(targetPaperId) => navigate(`/reader/${targetPaperId}`)} /> : <ParsedElementPanel elements={parsedElements} isLoading={parsedElementsLoading} onJumpToPage={setCurrentPage} />}
       </div>
-      <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} />
-      <ReaderSidebar paperId={paper.id} annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} onAddToNote={setEvidenceAnnotation} />
+      <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} onTranslateSelection={handleTranslateSelection} />
+      <ReaderSidebar paperId={paper.id} annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} activeTab={sideTab} translationText={translationState.text} translationResult={translationState.result} translationPending={translationState.pending} translationError={translationState.error} onTabChange={setSideTab} onRetryTranslation={() => { if (translationState.text) void runTranslation(translationState.text, translationState.targetLanguage); }} onOpenCitation={openCitation} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} onAddToNote={setEvidenceAnnotation} />
     </div>
     {editingPaper && <EditPaperDialog paper={paper} onClose={() => setEditingPaper(false)} onDelete={async (target) => { await deletePaper.mutateAsync(target.id); navigate("/library", { replace: true }); }} />}
     {evidenceAnnotation && <AddAnnotationToNoteDialog annotation={evidenceAnnotation} paperTitle={paper.title} onClose={() => setEvidenceAnnotation(null)} />}

@@ -6,7 +6,9 @@ from app.api.endpoints import (
     documents,
     embeddings,
     folders,
+    graph,
     keywords,
+    knowledge_relations,
     notes,
     papers,
     rag,
@@ -32,4 +34,6 @@ api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(embeddings.router, prefix="/embeddings", tags=["embeddings"])
 api_router.include_router(rag.router, prefix="/rag", tags=["rag"])
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+api_router.include_router(graph.router, prefix="/graph", tags=["graph"])
+api_router.include_router(knowledge_relations.router, prefix="/paper-relations", tags=["knowledge-relations"])
 api_router.include_router(workspace.router, prefix="/workspace", tags=["workspace"])

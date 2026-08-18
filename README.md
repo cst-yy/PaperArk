@@ -815,19 +815,61 @@ curl -X POST http://localhost:8000/api/ai/translate \
 
 ### S11-C：Deep Reading Structured Analysis
 
-新增 `POST /api/ai/deep-reading`，返回与 S9-C 数据语义对齐但不持久化的 `DeepReadingDraft`。Draft 覆盖 background、prior-work limitations、research problem、method、results、conclusion、limitations、future work、Contributions 与 Experiments；`my_thoughts` 明确保留为用户判断，不属于 AI 输出。为补齐实际 S9-C aggregate 与 Draft 的语义差异，迁移 `d8f1a6c3e9b2` 在既有 `ResearchNoteProfile` 上增加 `future_work`，并同步保存、读取、编辑与结构化搜索，不创建第二套研究笔记表。
+新增 `POST /api/ai/deep-reading`，返回与 S9-C 数据语义对齐的 `DeepReadingDraft`。Draft 覆盖 background、prior-work limitations、research problem、method、results、conclusion、limitations、future work、Contributions 与 Experiments；`my_thoughts` 明确保留为用户判断，不属于 AI 输出。为补齐实际 S9-C aggregate 与 Draft 的语义差异，迁移 `d8f1a6c3e9b2` 在既有 `ResearchNoteProfile` 上增加 `future_work`，并同步保存、读取、编辑与结构化搜索，不创建第二套研究笔记表。S11-D 起，成功且校验通过的 Draft 同时形成独立 provenance 记录，但仍不会自动修改 Note/Profile。
 
 `DeepReadingRetrievalService` 使用后端固定的 8 类 research intents 覆盖背景/问题、方法、创新、实验、结果、局限/未来工作与结论。每个 intent 均为当前用户、当前 Paper scope；union 后只保留 Paper Chunk，明确排除 Paper/Research/General Note。候选按 intent round-robin、source key 去重并施加 Section cap，最终使用最多 20 个来源和 12000 estimated-token budget，避免单一 Section 吞掉完整上下文。
 
 结构生成只接受严格 JSON。`DeepReadingPayload` 使用 Pydantic forbidden-extra 校验，重复 Contribution/Experiment client ID 或 Experiment 指向未知 Contribution 会使整个 Draft 失败；无效 JSON 最多执行一次“不新增内容”的 constrained repair。`StructuredEvidenceValidator` 对每个字段和卡片独立验证 `S#`，去重合法引用、删除非法引用并重新计算 grounded/insufficient；完全空的 Contribution/Experiment 会被丢弃。模型不能输出数据库 ID，可信 AI Source metadata 仍由当前 `RAGSource` 回填。
 
-Reader AI tab 可生成并审阅临时 Deep Reading Draft，按字段、创新点和实验展示 grounded 状态与可跳转 AI Source。生成本身不创建 Note、不修改 Research Profile、不创建 Annotation/NoteEvidence。用户点击“确认并应用”后，前端才调用既有 S9-C Note/Profile API：可显式新建或选择 Research Note，默认只填空标量、只应用 grounded 项并 append 卡片；覆盖已有标量或 replace-all 卡片必须明确选择。Apply 只写结构文本，AI Source 保持 provenance-only，`evidence_ids=[]`，`my_thoughts` 永远保留。
+Reader AI tab 可生成并审阅 Deep Reading Draft，按字段、创新点和实验展示 grounded 状态与可跳转 AI Source。生成本身不创建 Note、不修改 Research Profile、不创建 Annotation/NoteEvidence。用户点击“确认并应用”后，S11-D 的后端原子 Apply 才会修改显式选择的目标 Research Note：默认只填空标量并 append 卡片；覆盖已有标量或 replace-all 卡片必须明确选择。AI Source 保持 provenance-only，`evidence_ids=[]`，`my_thoughts` 永远保留。
 
 ```bash
 curl -X POST http://localhost:8000/api/ai/deep-reading \
   -H "Content-Type: application/json" \
   -d '{"paper_id":"<uuid>","retrieval_mode":"hybrid"}'
 ```
+
+### S11-D：AI Result Provenance + Apply Workflow Hardening
+
+成功且通过严格契约校验的 Deep Reading 会保存为不可变 `AIAnalysis`。记录包含用户、论文、provider/model、prompt version、retrieval mode、输入与来源快照 hash、结构化结果和时间；`AIAnalysisSource` 保存当次来源正文与定位快照，即使后续重解析替换 Chunk，历史分析仍可审计。空上下文、Provider 失败和无效结构不会产生 ready 分析。
+
+新增论文级历史列表、分析详情、删除与 Apply API。Apply 只接受已保存分析 ID、目标 Research Note、字段/卡片选择、冲突策略和 `expected_revision`，后端从不可变结果重建变更并在单事务内保存 profile 与 `AIAnalysisApplication` 审计记录。仅 grounded 且非 insufficient 的内容可应用；Experiment 必须连同依赖 Contribution 一起选择；目标必须是同论文 Research Note；`my_thoughts` 永远不在 AI 可写字段中。revision 冲突返回 409 并完整回滚。
+
+Reader 提供分析历史、只读历史草稿、provenance 摘要、字段级选择与显式 append/replace、fill-empty/overwrite 操作。AI Source 仅用于审阅和跳回原文人工标注，不自动创建 Annotation、NoteEvidence 或 Library Paper。删除分析历史不会回删已经应用到笔记的内容。
+
+### S12-A：PaperRelation + Citation Resolution
+
+早期 `paper_relations` 占位表已收口为独立、用户隔离的知识关系实体。第一版只正式生成 `relation_type=cites`、`origin=reference`，并保存 `source_reference_id` 与匹配 confidence。唯一约束为 `(user_id, source_paper_id, target_paper_id, relation_type)`；数据库同时拒绝自引用。删除任一 Paper 会级联清理相关 edge，删除 relation 不影响 Paper。
+
+`PaperRelationService.sync_citations_for_paper()` 使用 replacement contract，只替换该来源论文由 Reference 管理的 citation relations。当前有效 References 中 DOI、arXiv 或 normalized title 命中的 Workspace Paper 会形成一条去重 edge；未导入、跨用户、自引用和重复 Reference 不会形成虚假节点或重复边。Document derived snapshot 成功替换后会在同一事务内同步 citation relations，因此 reparse 会清理 stale edge。
+
+`ReferenceResolutionService` 会在 Paper 创建、PDF 导入和 DOI/arXiv/title 元数据更新后重新解析当前用户已有 References，再同步受影响来源论文。因此“先解析 Reference，后导入 target Paper”也会补建关系；目标身份字段改掉时旧 match 与 edge 会被解除。读取接口为 `GET /api/papers/{paper_id}/relations`，同时返回 incoming/outgoing 列表与计数，且先验证 Paper ownership。
+
+### S12-B：Citation Graph
+
+新增只读 `GET /api/graph/citations`。无 `paper_id` 时返回当前 Workspace 中存在 citation edge 的论文；指定 `paper_id` 时执行 incoming/outgoing 双向 BFS，`depth` 仅允许 1 或 2，并在确定 node set 后再次查询其中全部 edge，返回 induced subgraph。循环关系通过 visited distance map 截断，不会无限遍历。Graph 查询只消费 `PaperRelation(cites/reference)`，不会触发 Reference matching 或任何写操作。
+
+节点通过一次 Paper/Author 批量加载组装，incoming/outgoing count 使用分组查询，不按节点执行 count。source/target Paper 和 Relation 均重复施加 user scope。Workspace 默认最多 200 nodes，API 允许 10–500；截断顺序稳定，并显式返回 `truncated` 与 `total_nodes`。局部图始终优先保留 root，Workspace 图不包含孤立 Paper，而孤立 root 仍返回单节点。
+
+前端新增 `/graph/citations?paper_id=<uuid>&depth=1|2` 和侧栏入口。轻量 SVG 画布提供有向箭头、缩放、平移、root 高亮、节点/edge 选择及详情侧栏；节点可跳 Library、Reader 或重新设为中心。Edge 详情按需读取 Reference raw citation、编号和匹配方式，默认图加载不会逐 edge 查询 Reference。图仅为视图，不支持创建、拖拽或编辑关系。
+
+### S12-C：Knowledge Relation Layer
+
+`PaperRelation` 已扩展为 `cites / extends / improves / contrasts / supports / uses / similar`，并严格区分 `reference / manual / ai` 生命周期。`cites/reference` 仍只由 Reference resolution 管理；manual 关系支持创建、更新和删除，AI 只能先创建 pending suggestion，用户显式 Accept 后才生成正式 `origin=ai` edge。所有写入均验证 source/target 的用户归属并拒绝 self relation；`similar` 会把 UUID pair canonicalize，防止 A→B 与 B→A 重复，有向关系则允许反向命题独立存在。
+
+关系可通过 `PUT /api/paper-relations/{relation_id}/evidence` 原子替换 Annotation/Reference evidence。服务会先完整验证 ownership 与 relation paper scope，再写入带 `quote_snapshot` 和稳定顺序的证据；失败不会破坏旧集合，删除 evidence 不会删除来源实体。AI suggestion 使用 S10 hybrid search 召回最多 10 篇候选，再仅以 source/target Paper chunks 做 pairwise 判断；`none` 不产生候选，无效类型或伪造 provenance 不会进入正式关系。Suggestion 保留 pending/accepted/rejected 审计状态，Accept/Reject 幂等；正式 AI relation 可读取当次 provider/model 与不可变 chunk provenance。
+
+新增独立只读 `GET /api/graph/knowledge`，支持 `paper_id`、`depth=1|2`、`relation_types`、`origins` 与 `limit_nodes`。默认只读取六种 knowledge relation 和 manual/ai origin；`cites/reference` 仅在显式筛选时加入，不改变 `/api/graph/citations` 的纯净 citation 语义。Knowledge Graph 使用双向 BFS、cycle protection、确定 node set 后的 induced subgraph、稳定截断、批量 degree/evidence count，并对 relation 及两端 Paper 重复施加 user scope。复杂可视化、布局持久化和异构概念节点仍留给 S12-D。
+
+### S12-D：Knowledge Graph UI + Mind Map
+
+Citation Graph 与 Knowledge Graph 已抽取为统一 `GraphCanvas / Node / Edge` 交互能力，支持稳定自动布局、pan、zoom、选择和节点拖动。知识边按 semantic type 映射颜色与标签，`similar` 无箭头，其余关系保持方向；reference、manual、AI origin 通过线型与 Inspector badge 区分。`/graph/knowledge` 的 root、depth、relation types 与 origins 全部保存在 URL 中，可刷新、复制和历史恢复。
+
+Knowledge Graph Inspector 支持论文打开、Reader 跳转、重新居中和安全的新建关系流程。人工关系 Dialog 明确展示 source/target 与自然语言 preview，可创建、编辑、删除并从两端论文已有 Annotation/Reference 中选择 evidence；系统 citation 与 AI accepted edge 只读。Evidence 和 AI chunk provenance 可跳回 Reader 原页。Pending AI suggestions 只出现在独立面板，Accept 后刷新正式图，Reject 不进入图谱。
+
+新增独立 `GraphLayout` view-state 模型与 `c4e8a1d7b3f9` 迁移，只保存 node positions，不保存 viewport、selection 或 hover，也不修改 Paper/PaperRelation。layout 按 user、graph type、scope key 隔离并使用 replacement save；无保存布局时使用确定性分层/环形布局。
+
+新增 `GET /api/papers/{paper_id}/mind-map` 与 `/mind-map?paper_id=...`。Mind Map 完全由最新 ResearchNoteProfile 动态派生，只包含 paper、profile field、contribution、experiment；Experiment 通过既有 ExperimentContribution 连接到 Contribution，Evidence 作为 Inspector detail 而非图节点。没有 Research Profile 时返回 root Paper 与明确空状态；结构化笔记更新后无需同步任务即可得到新图，不创建 `MindMapNode` 内容表。
 
 Search 页面已适配 Paper 结果卡、来源徽标、snippet 和 Paper 级分页。可定位的 Section/Chunk/Reference/Figure/Table match 跳转到 `/reader/{paperId}?document_id={documentId}&page={pageStart}`。Reader 仅在当前 Paper scope 初始化时消费一次 URL page，优先级为 URL page → ReadingProgress → Page 1，后续翻页不受 URL 持续控制。
 
@@ -1025,9 +1067,13 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S11-A | AI Provider + Grounded Answer Contract | ✅ |
 | S11-B | Paper Q&A + Selection Translation | ✅ |
 | S11-C | Deep Reading Structured Analysis + Explicit Apply | ✅ |
-| S11-D | AI Result Provenance + Apply Workflow Hardening | 下一步 |
-| S11 | AI Deep Reading | 进行中 |
-| S12 | 论文关系 + 知识图谱 |
+| S11-D | AI Result Provenance + Apply Workflow Hardening | ✅ |
+| S11 | AI Deep Reading | ✅ |
+| S12-A | PaperRelation + Citation Resolution | ✅ |
+| S12-B | Citation Graph | ✅ |
+| S12-C | Knowledge Relation Layer | ✅ |
+| S12-D | Knowledge Graph UI + Mind Map | ✅ |
+| S12 | Research Knowledge Graph | ✅ |
 
 ---
 

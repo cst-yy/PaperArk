@@ -3,6 +3,8 @@ from __future__ import annotations
 from app.processors.generation import GenerationMessage
 from app.schemas.rag import RAGSource
 
+DEEP_READING_PROMPT_VERSION = "deep-reading-v1"
+
 
 class DeepReadingPromptBuilder:
     SYSTEM = """You create a structured research analysis using only supplied PAPER sources.

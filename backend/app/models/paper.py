@@ -85,12 +85,14 @@ class Paper(Base):
         back_populates="source_paper",
         foreign_keys="PaperRelation.source_paper_id",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     incoming_relations: Mapped[list["PaperRelation"]] = relationship(
         "PaperRelation",
         back_populates="target_paper",
         foreign_keys="PaperRelation.target_paper_id",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     matched_references: Mapped[list["Reference"]] = relationship(
         "Reference", back_populates="matched_paper", foreign_keys="Reference.matched_paper_id"

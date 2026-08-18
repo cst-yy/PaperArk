@@ -1,5 +1,6 @@
 import { api } from "@/services/api";
-import type { DeepReadingDraft, PaperQAResponse, RetrievalMode, TargetLanguage, TranslationResult } from "./types";
+import type { ResearchProfileResponse } from "@/features/notes/researchTypes";
+import type { AIAnalysisApplyRequest, AIAnalysisBrief, AIAnalysisDetail, DeepReadingDraft, PaperQAResponse, RetrievalMode, TargetLanguage, TranslationResult } from "./types";
 
 export async function askPaperQuestion(input: {
   paperId: string;
@@ -33,4 +34,20 @@ export async function generateDeepReading(paperId: string): Promise<DeepReadingD
     retrieval_mode: "hybrid",
   });
   return response.data;
+}
+
+export async function listAIAnalyses(paperId: string): Promise<AIAnalysisBrief[]> {
+  return (await api.get<AIAnalysisBrief[]>(`/papers/${paperId}/ai-analyses`)).data;
+}
+
+export async function getAIAnalysis(analysisId: string): Promise<AIAnalysisDetail> {
+  return (await api.get<AIAnalysisDetail>(`/ai/analyses/${analysisId}`)).data;
+}
+
+export async function deleteAIAnalysis(analysisId: string): Promise<void> {
+  await api.delete(`/ai/analyses/${analysisId}`);
+}
+
+export async function applyAIAnalysis(analysisId: string, request: AIAnalysisApplyRequest): Promise<{ application_id: string; analysis_id: string; profile: ResearchProfileResponse }> {
+  return (await api.post(`/ai/analyses/${analysisId}/apply`, request)).data;
 }

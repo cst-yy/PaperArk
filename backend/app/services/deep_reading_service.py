@@ -17,12 +17,14 @@ from app.schemas.deep_reading import (
 )
 from app.services.deep_reading_prompt import DeepReadingPromptBuilder
 from app.services.deep_reading_retrieval import DeepReadingRetrievalService
+from app.services.ai_analysis_service import AIAnalysisService
 from app.services.structured_evidence_validator import StructuredEvidenceValidator
 
 
 class DeepReadingService:
     def __init__(self, db, generation_provider: GenerationProvider,
                  embedding_provider: EmbeddingProvider | None = None):
+        self.db = db
         self.retrieval = DeepReadingRetrievalService(db, embedding_provider)
         self.generation_provider = generation_provider
         self.prompt = DeepReadingPromptBuilder()
@@ -40,23 +42,25 @@ class DeepReadingService:
                 sources=[], source_count=0,
             )
 
-        first = await self.generation_provider.generate(
+        final_result = await self.generation_provider.generate(
             self.prompt.build(context.sources), settings.AI_TEMPERATURE,
             settings.DEEP_READING_MAX_OUTPUT_TOKENS,
         )
         try:
-            payload = self._parse(first.text)
+            payload = self._parse(final_result.text)
         except StructuredGenerationError:
-            repaired = await self.generation_provider.generate(
-                self.prompt.repair(first.text), 0.0, settings.DEEP_READING_MAX_OUTPUT_TOKENS
+            final_result = await self.generation_provider.generate(
+                self.prompt.repair(final_result.text), 0.0, settings.DEEP_READING_MAX_OUTPUT_TOKENS
             )
-            payload = self._parse(repaired.text)
+            payload = self._parse(final_result.text)
 
-        validated, citations = self.evidence.validate(payload, context.sources)
-        return DeepReadingDraft(
-            **validated.model_dump(), paper_id=request.paper_id,
-            requested_mode=context.requested_mode, effective_mode=context.effective_mode,
-            sources=citations, source_count=len(citations),
+        validated, _ = self.evidence.validate(payload, context.sources)
+        return await AIAnalysisService(self.db).save_deep_reading(
+            user_id=user_id, paper_id=request.paper_id, payload=validated,
+            sources=context.sources, requested_mode=context.requested_mode,
+            effective_mode=context.effective_mode,
+            provider_name=getattr(self.generation_provider, "provider_name", "unknown"),
+            model=final_result.model,
         )
 
     @staticmethod

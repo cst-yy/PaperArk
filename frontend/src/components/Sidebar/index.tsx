@@ -14,6 +14,8 @@ import {
   Plus,
   Trash2,
   X,
+  Network,
+  BrainCircuit,
 } from "lucide-react";
 import clsx from "clsx";
 import { useFolders, useCreateFolder } from "@/features/folder/hooks";
@@ -194,6 +196,27 @@ export function Sidebar() {
         >
           <Brain className="h-4 w-4" />
           笔记
+        </NavLink>
+        <NavLink
+          to="/graph/citations"
+          className={({ isActive }) => clsx("flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", isActive ? "bg-primary-50 text-primary-600 font-medium" : "text-gray-600 hover:bg-gray-50")}
+        >
+          <Network className="h-4 w-4" />
+          引用图谱
+        </NavLink>
+        <NavLink
+          to="/graph/knowledge"
+          className={({ isActive }) => clsx("flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", isActive ? "bg-primary-50 text-primary-600 font-medium" : "text-gray-600 hover:bg-gray-50")}
+        >
+          <Network className="h-4 w-4" />
+          知识图谱
+        </NavLink>
+        <NavLink
+          to="/mind-map"
+          className={({ isActive }) => clsx("flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", isActive ? "bg-primary-50 text-primary-600 font-medium" : "text-gray-600 hover:bg-gray-50")}
+        >
+          <BrainCircuit className="h-4 w-4" />
+          论文思维导图
         </NavLink>
       </nav>
 

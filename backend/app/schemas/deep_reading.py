@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.ai import AICitation
 from app.schemas.rag import RAGMode
+from app.schemas.research_note import ResearchProfileResponse
 
 
 class GroundedStructuredField(BaseModel):
@@ -81,3 +84,78 @@ class DeepReadingDraft(DeepReadingPayload):
     effective_mode: RAGMode
     sources: list[AICitation]
     source_count: int
+    analysis_id: UUID | None = None
+    provider_name: str | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+    source_snapshot_hash: str | None = None
+    input_hash: str | None = None
+    created_at: datetime | None = None
+
+
+class AIAnalysisSourceResponse(BaseModel):
+    label: str
+    source_key: str
+    source_type: str
+    paper_id: UUID
+    document_id: UUID | None = None
+    chunk_id: UUID | None = None
+    section_title: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    title: str
+    content_snapshot: str
+    content_hash: str
+    retrieval_score: float | None = None
+
+
+class AIAnalysisBrief(BaseModel):
+    analysis_id: UUID
+    analysis_type: Literal["deep_reading"]
+    status: Literal["ready"]
+    provider_name: str
+    model: str
+    prompt_version: str
+    retrieval_mode: RAGMode
+    source_count: int
+    application_count: int
+    source_snapshot_hash: str
+    created_at: datetime
+
+
+class AIAnalysisDetail(BaseModel):
+    draft: DeepReadingDraft
+    source_snapshots: list[AIAnalysisSourceResponse]
+
+
+AIApplicableScalar = Literal[
+    "background", "prior_work_limitations", "research_problem", "method_summary",
+    "results_summary", "conclusion", "limitations", "future_work",
+]
+
+
+class AIAnalysisApplySelection(BaseModel):
+    scalar_fields: list[AIApplicableScalar] = Field(default_factory=list)
+    contribution_client_ids: list[str] = Field(default_factory=list)
+    experiment_client_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_selections(self):
+        for values in (self.scalar_fields, self.contribution_client_ids, self.experiment_client_ids):
+            if len(values) != len(set(values)):
+                raise ValueError("apply selections must be unique")
+        return self
+
+
+class AIAnalysisApplyRequest(BaseModel):
+    note_id: UUID
+    apply: AIAnalysisApplySelection
+    scalar_conflict_policy: Literal["fill_empty", "replace"] = "fill_empty"
+    collections_mode: Literal["append", "replace"] = "append"
+    expected_revision: int = Field(ge=0)
+
+
+class AIAnalysisApplyResponse(BaseModel):
+    application_id: UUID
+    analysis_id: UUID
+    profile: ResearchProfileResponse

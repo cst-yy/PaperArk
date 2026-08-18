@@ -40,6 +40,7 @@ from app.core.storage import (
 from app.models import Paper
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.paper_repository import PaperRepository, normalize_orcid
+from app.services.reference_resolution_service import ReferenceResolutionService
 from app.schemas.keyword import KeywordReplacement, PaperKeywordBrief
 from app.services.keyword_service import KeywordService
 from app.schemas.document import DocumentBrief
@@ -273,6 +274,10 @@ class PaperService:
             for folder in valid_folders:
                 await self.repo.add_folder(paper.id, folder.id)
 
+        await ReferenceResolutionService(self.db).resolve_workspace_for_paper_change(
+            user_id, paper.id
+        )
+
         # Reload with relationships
         return await self.repo.get_by_id(paper.id, user_id)
 
@@ -426,6 +431,11 @@ class PaperService:
                 raise DuplicatePaperError(dup.title)
 
         await self.repo.update(paper, **update_data)
+
+        if identity_fields & update_data.keys():
+            await ReferenceResolutionService(self.db).resolve_workspace_for_paper_change(
+                user_id, paper_id
+            )
 
         # Reload with relationships
         return await self.repo.get_by_id(paper_id, user_id)
@@ -634,6 +644,9 @@ class PaperService:
                 paper_id, [keyword.id for keyword in keywords]
             )
             await self.repo.replace_folders(paper_id, data.folder_ids)
+            await ReferenceResolutionService(self.db).resolve_workspace_for_paper_change(
+                user_id, paper_id
+            )
 
         self.db.expire(paper, ["authors", "tags", "keywords", "folder_assignments"])
         return await self.get_paper(user_id, paper_id)
@@ -729,6 +742,10 @@ class PaperService:
                 file_hash=file_hash,
                 mime_type="application/pdf",
                 parse_status="pending",
+            )
+
+            await ReferenceResolutionService(self.db).resolve_workspace_for_paper_change(
+                user_id, paper.id
             )
 
             # 5. Explicit commit: this extends compensation to the final

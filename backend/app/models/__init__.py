@@ -1,4 +1,5 @@
 from app.models.annotation import Annotation
+from app.models.ai_analysis import AIAnalysis, AIAnalysisApplication, AIAnalysisSource
 from app.models.author import Author, PaperAuthor
 from app.models.chunk import Chunk
 from app.models.document import Document
@@ -10,7 +11,8 @@ from app.models.paper import Paper
 from app.models.reading_progress import ReadingProgress
 from app.models.reference import Reference
 from app.models.research_note import ContributionEvidence, ExperimentContribution, ExperimentEvidence, ResearchContribution, ResearchExperiment, ResearchNoteProfile
-from app.models.relation import PaperRelation
+from app.models.relation import PaperRelation, PaperRelationEvidence, PaperRelationSuggestion
+from app.models.graph_layout import GraphLayout
 from app.models.section import Section
 from app.models.setting import Setting
 from app.models.tag import PaperTag, Tag
@@ -26,6 +28,7 @@ __all__ = [
     "Section",
     "Chunk",
     "Annotation",
+    "AIAnalysis", "AIAnalysisSource", "AIAnalysisApplication",
     "Note",
     "NoteLink",
     "NoteEvidence",
@@ -36,6 +39,9 @@ __all__ = [
     "Keyword",
     "PaperKeyword",
     "PaperRelation",
+    "PaperRelationEvidence",
+    "PaperRelationSuggestion",
+    "GraphLayout",
     "ReadingProgress",
     "Reference",
     "ResearchNoteProfile", "ResearchContribution", "ResearchExperiment",

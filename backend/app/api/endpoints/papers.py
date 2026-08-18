@@ -35,6 +35,11 @@ from app.core.exceptions import (
     PaperNotFoundError,
     StorageError,
     TagNotFoundError,
+    PaperRelationNotFoundError,
+    InvalidPaperRelationError,
+    DuplicatePaperRelationError,
+    GenerationProviderError,
+    SemanticRetrievalError,
 )
 from app.schemas.keyword import KeywordReplacement
 from app.schemas.reading_progress import ReadingProgressResponse, ReadingProgressUpsert
@@ -54,8 +59,56 @@ from app.schemas.paper import (
 from app.services.paper_service import PaperMapper, PaperService, get_paper_service
 from app.services.reading_progress_service import ReadingProgressService
 from app.services.note_service import NoteService
+from app.schemas.deep_reading import AIAnalysisBrief
+from app.schemas.paper_relation import PaperRelationsResponse
+from app.services.ai_analysis_service import AIAnalysisService
+from app.services.paper_relation_service import PaperRelationService
+from app.schemas.knowledge_relation import (
+    KnowledgeRelationResponse, ManualRelationCreate, ManualRelationUpdate,
+    RelationSuggestionGenerateRequest, RelationSuggestionResponse,
+)
+from app.services.knowledge_relation_service import KnowledgeRelationService
+from app.services.relation_suggestion_service import RelationSuggestionService
+from app.processors.generation import GenerationProvider, OpenAICompatibleGenerationProvider
+from app.schemas.mind_map import MindMapResponse
+from app.services.mind_map_service import MindMapService
 
 router = APIRouter()
+
+
+def get_relation_generation_provider() -> GenerationProvider:
+    return OpenAICompatibleGenerationProvider()
+
+
+def _relation_error(error: Exception) -> HTTPException:
+    if isinstance(error, (PaperNotFoundError, PaperRelationNotFoundError)):
+        code = 404
+    elif isinstance(error, DuplicatePaperRelationError):
+        code = 409
+    else:
+        code = 422
+    return HTTPException(status_code=code, detail=getattr(error, "message", str(error)))
+
+
+@router.get("/{paper_id}/ai-analyses", response_model=list[AIAnalysisBrief])
+async def list_paper_ai_analyses(
+    paper_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    # Empty is indistinguishable from an inaccessible paper unless ownership is checked first.
+    paper = await PaperService(db).repo.get_by_id(paper_id, user_id)
+    if paper is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return await AIAnalysisService(db).list_for_paper(user_id, paper_id)
+
+
+@router.get("/{paper_id}/mind-map", response_model=MindMapResponse)
+async def get_paper_mind_map(
+    paper_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try: return await MindMapService(db).get(user_id, paper_id)
+    except PaperNotFoundError as error: raise HTTPException(status_code=404, detail=error.message) from error
 
 # ── Exception -> HTTP status code mapping ──
 
@@ -159,6 +212,76 @@ async def list_paper_notes(
         return await NoteService(db).list_notes(user_id, paper_id)
     except InvalidNoteError as error:
         raise HTTPException(status_code=404, detail=error.message)
+
+
+@router.get("/{paper_id}/relations", response_model=PaperRelationsResponse)
+async def get_paper_relations(
+    paper_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return await PaperRelationService(db).get_relations(user_id, paper_id)
+    except PaperNotFoundError as error:
+        raise HTTPException(status_code=404, detail=error.message) from error
+
+
+@router.post("/{paper_id}/relations", response_model=KnowledgeRelationResponse, status_code=201)
+async def create_knowledge_relation(
+    paper_id: uuid.UUID, data: ManualRelationCreate,
+    db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return await KnowledgeRelationService(db).create(user_id, paper_id, data)
+    except (PaperNotFoundError, InvalidPaperRelationError, DuplicatePaperRelationError) as error:
+        raise _relation_error(error) from error
+
+
+@router.put("/{paper_id}/relations/{relation_id}", response_model=KnowledgeRelationResponse)
+async def update_knowledge_relation(
+    paper_id: uuid.UUID, relation_id: uuid.UUID, data: ManualRelationUpdate,
+    db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return await KnowledgeRelationService(db).update(user_id, paper_id, relation_id, data)
+    except (PaperNotFoundError, PaperRelationNotFoundError, InvalidPaperRelationError, DuplicatePaperRelationError) as error:
+        raise _relation_error(error) from error
+
+
+@router.delete("/{paper_id}/relations/{relation_id}", status_code=204)
+async def delete_knowledge_relation(
+    paper_id: uuid.UUID, relation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        await KnowledgeRelationService(db).delete(user_id, paper_id, relation_id)
+    except (PaperRelationNotFoundError, InvalidPaperRelationError) as error:
+        raise _relation_error(error) from error
+
+
+@router.post("/{paper_id}/relation-suggestions/generate", response_model=list[RelationSuggestionResponse])
+async def generate_relation_suggestions(
+    paper_id: uuid.UUID, data: RelationSuggestionGenerateRequest,
+    db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id),
+    provider: GenerationProvider = Depends(get_relation_generation_provider),
+):
+    try:
+        return await RelationSuggestionService(db, provider).generate(user_id, paper_id, data.max_candidates)
+    except (PaperNotFoundError, InvalidPaperRelationError) as error:
+        raise _relation_error(error) from error
+    except (GenerationProviderError, SemanticRetrievalError) as error:
+        raise HTTPException(status_code=503, detail="AI relation suggestion is temporarily unavailable") from error
+
+
+@router.get("/{paper_id}/relation-suggestions", response_model=list[RelationSuggestionResponse])
+async def list_relation_suggestions(
+    paper_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return await RelationSuggestionService(db, OpenAICompatibleGenerationProvider()).list(user_id, paper_id)
+    except PaperNotFoundError as error:
+        raise _relation_error(error) from error
 
 
 @router.get("/{paper_id}", response_model=PaperResponse)

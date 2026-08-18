@@ -80,4 +80,53 @@ export interface DeepReadingDraft {
   experiments: DeepReadingExperiment[];
   sources: AICitation[];
   source_count: number;
+  analysis_id?: string | null;
+  provider_name?: string | null;
+  model?: string | null;
+  prompt_version?: string | null;
+  source_snapshot_hash?: string | null;
+  input_hash?: string | null;
+  created_at?: string | null;
+}
+
+export interface AIAnalysisBrief {
+  analysis_id: string;
+  analysis_type: "deep_reading";
+  status: "ready";
+  provider_name: string;
+  model: string;
+  prompt_version: string;
+  retrieval_mode: RetrievalMode;
+  source_count: number;
+  application_count: number;
+  source_snapshot_hash: string;
+  created_at: string;
+}
+
+export interface AIAnalysisSourceSnapshot extends AICitation {
+  content_snapshot: string;
+  content_hash: string;
+  chunk_id?: string | null;
+  retrieval_score?: number | null;
+}
+
+export interface AIAnalysisDetail {
+  draft: DeepReadingDraft;
+  source_snapshots: AIAnalysisSourceSnapshot[];
+}
+
+export type AIApplicableScalar = Exclude<keyof Pick<DeepReadingDraft,
+  "background" | "prior_work_limitations" | "research_problem" | "method_summary" |
+  "results_summary" | "conclusion" | "limitations" | "future_work">, never>;
+
+export interface AIAnalysisApplyRequest {
+  note_id: string;
+  apply: {
+    scalar_fields: AIApplicableScalar[];
+    contribution_client_ids: string[];
+    experiment_client_ids: string[];
+  };
+  scalar_conflict_policy: "fill_empty" | "replace";
+  collections_mode: "append" | "replace";
+  expected_revision: number;
 }

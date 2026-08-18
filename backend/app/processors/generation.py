@@ -25,6 +25,7 @@ class GenerationResult:
 
 
 class GenerationProvider(Protocol):
+    provider_name: str
     model_name: str
 
     async def generate(
@@ -36,6 +37,8 @@ class GenerationProvider(Protocol):
 
 
 class OpenAICompatibleGenerationProvider:
+    provider_name = "openai-compatible"
+
     def __init__(
         self,
         *,

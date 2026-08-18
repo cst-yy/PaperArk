@@ -34,6 +34,7 @@ from app.parsers.reference_segmenter import ReferenceSegmenter
 from app.parsers.section_detector import SectionDetector
 from app.repositories.document_repository import DocumentRepository
 from app.services.document_derived_service import DerivedDocumentSnapshot, DocumentDerivedService
+from app.services.paper_relation_service import PaperRelationService
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,9 @@ class DocumentParseService:
             # This savepoint protects every old derived row on replacement failure.
             async with self.db.begin_nested():
                 await DocumentDerivedService(self.db).replace(document, snapshot)
+                await PaperRelationService(self.db).sync_citations_for_paper(
+                    user_id, document.paper_id
+                )
                 await self.db.execute(
                     update(Document)
                     .where(Document.id == document_id)

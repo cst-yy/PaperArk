@@ -122,3 +122,27 @@ class GenerationProviderError(DomainError):
 
 class StructuredGenerationError(DomainError):
     """Raised when deep-reading output cannot satisfy the strict draft contract."""
+
+
+class AIAnalysisNotFoundError(DomainError):
+    """Raised when an analysis is missing or belongs to another user."""
+
+
+class InvalidAIAnalysisError(DomainError):
+    """Raised when a stored analysis cannot be safely applied."""
+
+
+class RevisionConflictError(DomainError):
+    """Raised when a research profile changed after the user reviewed it."""
+
+
+class PaperRelationNotFoundError(DomainError):
+    """Raised when a relation is missing or belongs to another user."""
+
+
+class InvalidPaperRelationError(DomainError):
+    """Raised when a relation violates lifecycle, ownership, or evidence rules."""
+
+
+class DuplicatePaperRelationError(DomainError):
+    """Raised when the same semantic relation already exists."""

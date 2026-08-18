@@ -41,7 +41,10 @@ def normalize_doi(raw: str | None) -> str | None:
 def normalize_arxiv_id(raw: str | None) -> str | None:
     if not raw:
         return None
-    match = _ARXIV.search(raw.strip())
+    cleaned = raw.strip()
+    if re.fullmatch(r"\d{4}\.\d{4,5}(?:v\d+)?", cleaned, re.IGNORECASE):
+        return cleaned.lower()
+    match = _ARXIV.search(cleaned)
     return match.group(1).lower() if match else None
 
 

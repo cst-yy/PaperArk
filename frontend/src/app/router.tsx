@@ -7,6 +7,9 @@ import Reader from "@/pages/Reader";
 import Notes from "@/pages/Notes";
 import Search from "@/pages/Search";
 import Settings from "@/pages/Settings";
+import CitationGraph from "@/pages/CitationGraph";
+import KnowledgeGraph from "@/pages/KnowledgeGraph";
+import MindMap from "@/pages/MindMap";
 
 export function AppRouter() {
   return (
@@ -19,6 +22,9 @@ export function AppRouter() {
         <Route path="/papers/:paperId/notes" element={<Notes />} />
         <Route path="/search" element={<Search />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/graph/citations" element={<CitationGraph />} />
+        <Route path="/graph/knowledge" element={<KnowledgeGraph />} />
+        <Route path="/mind-map" element={<MindMap />} />
       </Route>
 
       <Route path="/reader/:paperId" element={<Reader />} />

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, BookOpen, ExternalLink, Focus, Loader2, Network, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -23,6 +23,7 @@ export default function KnowledgeGraphPage() {
   const graph = useKnowledgeGraph(paperId, depth, relationTypes, origins);
   const scopeKey = `${paperId ? `paper:${paperId}` : "workspace"}:depth:${depth}:types:${relationTypes.join("-")}:origins:${origins.join("-")}`;
   const layout = useGraphLayout("knowledge", scopeKey); const saveLayout = useSaveGraphLayout(); const saveTimer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(saveTimer.current), []);
   const [selectedNodeId, setSelectedNodeId] = useState<string>(); const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
   const [dialog, setDialog] = useState<{ sourceId: string; relation?: KnowledgeRelation }>(); const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const relation = useKnowledgeRelation(selectedEdgeId);

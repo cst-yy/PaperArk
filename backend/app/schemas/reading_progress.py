@@ -10,6 +10,7 @@ class ReadingProgressUpsert(BaseModel):
     document_id: UUID
     current_page: int = Field(ge=1)
     total_pages: int = Field(ge=1)
+    reading_time_seconds_delta: int = Field(default=0, ge=0, le=300)
 
     @model_validator(mode="after")
     def validate_page_range(self) -> "ReadingProgressUpsert":

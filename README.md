@@ -558,6 +558,10 @@ await uploadMut.mutateAsync({
 // 上传成功后自动 invalidate papers query → Library 自动刷新
 ```
 
+上传期间会自动执行离线 PDF 元数据识别。优先读取 PDF 内嵌 `title`、`subject`、`keywords` 与创建年份，并使用首页版式和前三页正文补充标题、作者、摘要、关键词、DOI、arXiv ID、年份，以及明确标注的期刊、会议和出版社。作者优先取首页可见作者区，因为 PDF 的内嵌 Author 经常只是文件创建者；姓名会清除邮箱、上标、会员头衔和通讯作者说明。首页存在明确单位信息时，数字上标用于映射各作者机构；无编号的统一机构块作为共同机构保存。关键词支持摘要后的单行或多行 `Keywords`、`Key words`、`Index Terms`，会合并行尾断词，并在 Introduction、Nomenclature 或下一元数据区块前停止。关键词以 `metadata` 来源保存，与手工关键词并存。识别异常只回退到文件名，不会导致上传失败，也不会伪造无法可靠判断的字段。
+
+正文结构解析随后自动启动；完成后前端刷新 Paper list/detail cache。自动提取结果仍可通过论文元数据编辑器检查和修正。
+
 ### 构建 Document 文件 URL
 
 ```typescript
@@ -871,6 +875,30 @@ Knowledge Graph Inspector 支持论文打开、Reader 跳转、重新居中和�
 
 新增 `GET /api/papers/{paper_id}/mind-map` 与 `/mind-map?paper_id=...`。Mind Map 完全由最新 ResearchNoteProfile 动态派生，只包含 paper、profile field、contribution、experiment；Experiment 通过既有 ExperimentContribution 连接到 Contribution，Evidence 作为 Inspector detail 而非图节点。没有 Research Profile 时返回 root Paper 与明确空状态；结构化笔记更新后无需同步任务即可得到新图，不创建 `MindMapNode` 内容表。
 
+### S13-A：Performance & Bundle Hardening
+
+前端所有页面入口已改为 route-level `React.lazy`，并由统一 `Suspense` loading boundary 承接。生产 manifest 证明 Library、Search、Notes、Reader、Citation Graph、Knowledge Graph、Mind Map、Settings 与 Dashboard 均为独立 dynamic entry；初始 HTML 只引用 283.75 kB（gzip 93.09 kB）的应用入口，不 preload Reader、Notes 或 Graph chunk。`pdf.worker.min.mjs` 仅作为 Reader dynamic entry 的 asset，进入首页、Library、Search 或 Notes 均不会下载 PDF.js worker。
+
+后端审计覆盖 Papers、Search、Graph、Notes、RAG 与 Reader API。Library 列表只 eager-load DTO 实际使用的 Author、Tag 与 Document id，不再加载 Folder、Keyword 或完整 Document 字段。Semantic/Hybrid/RAG candidate pool 已有配置化上限；Lexical Search 为保持 Paper-level aggregation 与准确 total 仍会汇总全部命中，作为后续规模压测的观测项，不在本阶段改变稳定检索契约。
+
+Citation/Knowledge Workspace Graph 已将节点 endpoint 聚合、degree 排序、`total_nodes` 统计及 `limit_nodes` 截断下推 PostgreSQL，不再先把整个 Workspace edge set 与 Paper set materialize 到 Python。80 节点规模夹具验证 Citation Graph 查询数不超过 8、Knowledge Graph 不超过 10，查询数不随节点规模线性增长；截断后仍返回准确总数和 induced subgraph。
+
+### S13-A2：Frontend Runtime Memory Optimization
+
+Reader 保持单页 PDF.js 渲染，不引入不适用于当前架构的多页虚拟列表。React-PDF 继续负责 `loadingTask.destroy()`、render cancellation、`page.cleanup()` 与 canvas 尺寸归零；应用侧将 PDF canvas 的 `devicePixelRatio` 限制为最多 1.5，降低高分屏的像素缓冲区和 GPU 显存成本。
+
+Reader 的标注定位延迟任务，以及 Citation Graph、Knowledge Graph、Mind Map 的布局保存 debounce，均在页面卸载时显式清除。Document Sections、References、Elements、Annotations、AI Analysis history 与 Graph read models 等重型 React Query 数据离开最后一个 observer 后保留 60 秒，避免默认 5 分钟缓存把多篇论文和多张图同时留在内存；AI history 仍使用轻量 summary list，详情仅在用户选择时按需获取。
+
+浏览器回归在两篇真实 PDF 间交替进入 Reader 并返回 Library 共 6 轮：Reader 每轮只有一个非零 canvas（625 × 808），返回 Library 后 canvas count/pixel area 均为 0；Library DOM 每轮稳定为 457 个节点，没有随导航增长。浏览器安全接口不暴露强制 GC 或可靠 heap snapshot，因此验收以可复现的 DOM/canvas 生命周期为硬指标，heap 趋势留给 Chrome DevTools 发布验收。
+
+### S13-B：Data Integrity & Migration Drill
+
+Alembic 迁移链已按真实安装和升级路径演练：22 个 revision 从 `c0491cb1a8b2` 单线连续到唯一 head `c4e8a1d7b3f9`，无 orphan/head 分叉；所有 revision 均显式提供 downgrade，`alembic check` clean。全新 disposable 数据库可从 base 升级到 head，生成 35 张 public tables、`vector`/`pg_trgm` 扩展，并成功导入 FastAPI。
+
+可重复脚本 `backend/scripts/s13b_migration_drill.py` 分别从 S4.5 (`a6e9d2c4b7f0`)、S8 (`c9d4e7f2a1b8`) 与 S11 (`e9b4c2d7f1a6`) 写入当时合法的 Paper、Document、Annotation、ReadingProgress、Note、Tag、PaperRelation、Settings，以及 S11 的 NoteEvidence、ResearchNoteProfile、AIAnalysis/Source，再升级 head 并逐值验证数据保留。
+
+`backend/scripts/s13b_backup_restore_drill.py` 只允许连接名称含 `s13b_restore` 的 disposable DB 与 `/tmp/s13b-workspace`。演练生成并 verify 真实 `.airw`，比较升级前、engine restart 后、restore 后与注入 staging failure 自动回退后的完整 integrity manifest。实际覆盖 Paper、Document、Annotation、ReadingProgress、Note/NoteEvidence、ResearchProfile、AIAnalysis/Source、Reference、PaperRelation、GraphLayout、Settings、Workspace ID、PDF SHA-256、`Document.file_hash` 与 Alembic revision。损坏 payload 返回 `corrupted`，不兼容 manifest 返回 `unsupported`；事务型 migration 故障证明 DDL、数据和 revision 均安全回滚。
+
 Search 页面已适配 Paper 结果卡、来源徽标、snippet 和 Paper 级分页。可定位的 Section/Chunk/Reference/Figure/Table match 跳转到 `/reader/{paperId}?document_id={documentId}&page={pageStart}`。Reader 仅在当前 Paper scope 初始化时消费一次 URL page，优先级为 URL page → ReadingProgress → Page 1，后续翻页不受 URL 持续控制。
 
 ```bash
@@ -1074,6 +1102,16 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | S12-C | Knowledge Relation Layer | ✅ |
 | S12-D | Knowledge Graph UI + Mind Map | ✅ |
 | S12 | Research Knowledge Graph | ✅ |
+| S13-A | Performance & Bundle Hardening | ✅ |
+| S13-A2 | Frontend Runtime Memory Optimization | ✅ |
+| S13-B | Data Integrity & Migration Drill | ✅ |
+| S13-C | Real AI Provider Acceptance | ⏭️ |
+| S16-A | Unified AI Provider / Model / Pricing / Metering / Budget Gateway | ✅ |
+| S16-B | PageBlock + Versioned Translation Jobs + Glossary | ✅ |
+| S16-C | Reader Bilingual Comparison | ✅ |
+| S16-D | Persistent Paper Q&A + Grounded Citations | ✅ |
+| S16-E | AI Usage & Budget Center | ✅ |
+| S16 | AI Translation, Reader Q&A & Billing | ✅ |
 
 ---
 
@@ -1104,6 +1142,7 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 | DocumentRepository | 用户隔离查询（JOIN Paper.user_id），`get_by_id` + `get_by_paper` |
 | DocumentService | `get_document()` + `get_document_file()` 返回 `(Document, Path)` |
 | import_pdf 重构 | validate_pdf → UUID 存储 → create Paper + Document → 显式 commit → 失败时 rollback + 删除文件 |
+| PDF 元数据自动识别 | 内嵌 metadata + 首页版式 + 前三页正文，导入标题、作者、摘要、关键词、DOI/arXiv、年份及明确出版信息 |
 | 文件访问 API | `GET /api/documents/{id}/file` — `Content-Disposition: inline` |
 | PaperResponse 增强 | 新增 `document: DocumentBrief` 字段 |
 | PaperListResponse 增强 | 新增 `has_document: bool` 字段 |
@@ -1118,3 +1157,30 @@ docker compose exec db psql -U paper -d paper_workspace -c \
 ## License
 
 Personal project. All rights reserved.
+### S14-B — Editable Adaptive Data Grid
+
+论文列表现支持基于 `Paper` aggregate 的即时元数据编辑、`metadata_revision` 乐观并发控制、用户级列与显示偏好，以及阅读状态/收藏/标签/文件夹/删除的原子批量操作。表格使用容器 `ResizeObserver` 和语义权重约束分配列宽，所有可见列始终适配当前宽度，不依赖横向滚动；长文本使用独立编辑器，作者、关键词、标签和文件夹继续复用现有聚合编辑器。
+
+### S14-C — Resizable Grid & View Memory
+
+Paper List 表头支持鼠标拖拽与键盘调整列宽，用户期望宽度以 `auto/manual` 模式保存，响应式压缩只影响当前渲染宽度。英文和中文标题按实际列宽换行，并通过 DOM 测量驱动动态行高虚拟化；其他长字段跟随行高截断。V2 用户设置按 columns、appearance、query、layout 分区保存，带独立 revision 冲突保护，并恢复查询、分页、滚动位置和筛选面板状态；显式 URL 查询始终优先。
+
+### S14-D — Overlay Interaction Consistency
+
+全站非模态临时浮层统一由 `OverlayProvider` 管理：点击外部在 pointer-up 阶段关闭，内部交互保持打开，同级浮层互斥，Escape 仅关闭最上层并恢复触发器焦点，浏览器前进/后退时清理残留浮层。Paper List 的列设置、显示设置与论文关键词候选层已迁移到统一契约；删除、恢复、论文编辑和有未保存内容的长文本编辑仍保留显式确认边界，不会因误点遮罩静默关闭。
+
+### S15 — Dashboard Organizer & Sidebar Hardening
+
+Dashboard 保持原有全局网格，只将“最近论文”和“最近笔记”的既有占位分别拆成上下两区，并加入用户隔离的待办与备忘录。Todo 支持优先级、截止时间、关联论文、乐观完成与撤销；Memo 支持纯文本自动保存、置顶和低饱和颜色。两类数据均使用独立缓存和 revision 冲突保护。侧边栏移除独立收藏入口但保留收藏能力及 `/favorites` 兼容跳转，文件夹支持保持 ID 和论文关联不变的重命名、颜色设置/清除，并复用 S14-D 浮层契约。
+
+### S16 — AI Translation, Reader Q&A & Billing
+
+S16 建立统一 AI Gateway：Provider 密钥加密保存，Model/Pricing 独立登记，每次请求保存实际或估算 Token、Decimal 费用和历史价格快照，并在外部调用前使用 Reservation 原子预占预算。Paper 可限制云端 AI；自定义 Base URL 会执行协议、回环地址、元数据地址和私网 SSRF 校验。
+
+PDF 解析会生成稳定的 `PageBlock` 阅读区域。翻译遵循“估算 → 明确确认 → Celery/Redis 后台任务 → 分块持久化”的链路，支持选区、当前页、当前节、从当前页和全文，保留人工修订 revision，并按 source hash 复用已有译文。Reader 提供原文、版面对照、段落对照和纯译文模式；问答会话、消息及页码/区域/Chunk 引用永久保存，可人工保存为笔记。`/settings/ai-usage` 提供 Provider、模型价格、预算、汇总和单次请求账本入口。
+
+部署新增 `ai-worker` 服务。`backend` 与 `ai-worker` 共用 `paperark-backend:local` 镜像，避免重复构建大型解析与嵌入依赖：
+
+```text
+docker compose up -d --build
+```

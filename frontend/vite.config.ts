@@ -10,6 +10,16 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       host: "0.0.0.0",
+      watch: {
+        // A second Vite process (for example a production build running while
+        // the dev container is up) briefly creates this bundled-config file.
+        // On Docker Desktop's Windows bind mount, watching that transient path
+        // can raise EIO after it is removed and terminate the dev server.
+        ignored: [
+          "**/vite.config.*.timestamp-*.mjs",
+          "**/dist*/**",
+        ],
+      },
       proxy: {
         "/api": {
           // Local `npm run dev` uses localhost by default. Docker Compose sets

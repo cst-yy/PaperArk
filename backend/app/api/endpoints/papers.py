@@ -40,6 +40,7 @@ from app.core.exceptions import (
     DuplicatePaperRelationError,
     GenerationProviderError,
     SemanticRetrievalError,
+    RevisionConflictError,
 )
 from app.schemas.keyword import KeywordReplacement
 from app.schemas.reading_progress import ReadingProgressResponse, ReadingProgressUpsert
@@ -118,6 +119,7 @@ _EXCEPTION_STATUS = {
     FolderNotFoundError: 404,
     DocumentNotFoundError: 404,
     DuplicatePaperError: 409,
+    RevisionConflictError: 409,
     InvalidTagError: 400,
     InvalidFolderError: 400,
     InvalidFileTypeError: 400,
@@ -340,7 +342,7 @@ async def update_paper(
     """Update paper metadata."""
     try:
         paper = await service.update_paper(user_id, paper_id, data)
-    except (PaperNotFoundError, DuplicatePaperError) as e:
+    except (PaperNotFoundError, DuplicatePaperError, RevisionConflictError) as e:
         raise _handle_domain_error(e)
     return PaperMapper.to_detail_response(paper)
 
@@ -420,7 +422,7 @@ async def replace_metadata_aggregate(
     """Atomically save every editor-owned Paper metadata field and collection."""
     try:
         paper = await service.replace_metadata_aggregate(user_id, paper_id, data)
-    except (PaperNotFoundError, DuplicatePaperError, InvalidTagError, InvalidFolderError) as error:
+    except (PaperNotFoundError, DuplicatePaperError, InvalidTagError, InvalidFolderError, RevisionConflictError) as error:
         raise _handle_domain_error(error)
     return PaperMapper.to_detail_response(paper)
 

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import type { AxiosError } from "axios";
 import { Upload, X, FileText, CheckCircle, AlertCircle } from "lucide-react";
 import clsx from "clsx";
+import { useQueryClient } from "@tanstack/react-query";
 import { useUploadPaper } from "@/features/paper/hooks";
 import { MAX_PDF_SIZE_MB, parseDocument } from "@/features/paper/api";
 
@@ -23,6 +24,7 @@ export function ImportModal({ onClose }: ImportModalProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMut = useUploadPaper();
+  const queryClient = useQueryClient();
 
   const validateFile = (file: File): string | null => {
     // Front-end pre-validation (server still validates)
@@ -93,7 +95,14 @@ export function ImportModal({ onClose }: ImportModalProps) {
         },
       });
       const documentId = paper.document?.id ?? paper.documents[0]?.id;
-      if (documentId) void parseDocument(documentId).catch(() => undefined);
+      if (documentId) {
+        void parseDocument(documentId)
+          .then(() => Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["papers"] }),
+            queryClient.invalidateQueries({ queryKey: ["paper", paper.id] }),
+          ]))
+          .catch(() => undefined);
+      }
       setEntries((prev) =>
         prev.map((e, i) =>
           i === index ? { ...e, state: "success", progress: 100 } : e
@@ -203,7 +212,7 @@ export function ImportModal({ onClose }: ImportModalProps) {
                   </p>
                   <p className="text-xs text-gray-400">
                     {entry.state === "uploading" && `${entry.progress}%`}
-                    {entry.state === "success" && "上传成功"}
+                    {entry.state === "success" && "元数据已自动读取，正文解析中"}
                     {entry.state === "error" && entry.error}
                     {entry.state === "selected" && "等待上传"}
                   </p>

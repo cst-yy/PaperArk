@@ -124,16 +124,14 @@ class PaperRepository:
         offset: int = 0,
         limit: int = 20,
     ) -> PaperListResult:
-        """List papers with filters, pagination, and eager loading."""
+        """List papers with only the relationships required by PaperListResponse."""
         stmt = (
             select(Paper)
             .where(Paper.user_id == user_id)
             .options(
                 selectinload(Paper.authors).selectinload(PaperAuthor.author),
                 selectinload(Paper.tags).selectinload(PaperTag.tag),
-                selectinload(Paper.folder_assignments).selectinload(PaperFolder.folder),
-                selectinload(Paper.keywords).selectinload(PaperKeyword.keyword),
-                selectinload(Paper.documents),
+                selectinload(Paper.documents).load_only(Document.id),
             )
         )
         count_stmt = (
@@ -323,6 +321,33 @@ class PaperRepository:
             setattr(paper, key, value)
         await self.db.flush()
         return paper
+
+    async def update_metadata_if_revision(
+        self,
+        paper: Paper,
+        expected_revision: int,
+        **kwargs,
+    ) -> bool:
+        """Atomically update metadata only when the caller's snapshot is current."""
+        result = await self.db.execute(
+            update(Paper)
+            .where(
+                Paper.id == paper.id,
+                Paper.user_id == paper.user_id,
+                Paper.metadata_revision == expected_revision,
+            )
+            .values(**kwargs, metadata_revision=Paper.metadata_revision + 1)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            return False
+        await self.db.flush()
+        await self.db.refresh(paper)
+        return True
+
+    async def bump_metadata_revision(self, paper: Paper) -> None:
+        paper.metadata_revision += 1
+        await self.db.flush()
 
     async def delete(self, paper: Paper) -> None:
         await self.db.delete(paper)

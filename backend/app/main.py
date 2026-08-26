@@ -10,6 +10,9 @@ from app.core.config import settings
 from app.core.database import async_session_factory, engine, init_db
 from app.core.workspace_lock import workspace_lock
 from app.services.backup_service import BackupService
+from app.models import TranslationJob
+from app.services.translation_service import TranslationService
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +33,20 @@ async def _backup_scheduler() -> None:
         await asyncio.sleep(15 * 60)
 
 
+async def _resume_translation_jobs() -> None:
+    """Resume durable pending/in-flight translation jobs after a backend restart."""
+    async with async_session_factory() as session:
+        jobs = list((await session.execute(select(TranslationJob.user_id, TranslationJob.id).where(
+            TranslationJob.status.in_({"pending", "translating"})))).all())
+    for user_id, job_id in jobs:
+        asyncio.create_task(TranslationService.run_background(user_id, job_id))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Alembic owns schema creation; this only seeds the local user.
     await init_db()
+    await _resume_translation_jobs()
     scheduler_task = asyncio.create_task(_backup_scheduler())
     try:
         yield

@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen } from "lucide-react";
+import { ArrowRight, BookOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import type { RecentReadingItem } from "./types";
@@ -6,9 +6,11 @@ import type { RecentReadingItem } from "./types";
 interface RecentReadingListProps {
   items: RecentReadingItem[];
   isLoading: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }
 
-export function RecentReadingList({ items, isLoading }: RecentReadingListProps) {
+export function RecentReadingList({ items, isLoading, expanded, onToggleExpanded }: RecentReadingListProps) {
   return (
     <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
       <div className="mb-3 flex items-center justify-between">
@@ -16,7 +18,19 @@ export function RecentReadingList({ items, isLoading }: RecentReadingListProps) 
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">最近阅读</h2>
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">从上次阅读的位置继续</p>
         </div>
-        <BookOpen className="h-5 w-5 text-primary-500" />
+        <div className="flex items-center gap-2">
+          <BookOpen className="h-5 w-5 text-primary-500" />
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={expanded ? "收起最近阅读" : "展开最多 10 条最近阅读"}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-200"
+            onClick={onToggleExpanded}
+          >
+            {expanded ? "收起" : "查看更多"}
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
 
       {isLoading ? (

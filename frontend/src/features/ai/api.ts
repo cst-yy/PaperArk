@@ -1,6 +1,6 @@
 import { api } from "@/services/api";
 import type { ResearchProfileResponse } from "@/features/notes/researchTypes";
-import type { AIAnalysisApplyRequest, AIAnalysisBrief, AIAnalysisDetail, DeepReadingDraft, PaperQAResponse, RetrievalMode, TargetLanguage, TranslationResult } from "./types";
+import type { AIAnalysisApplyRequest, AIAnalysisBrief, AIAnalysisDetail, AIChatMessage, AIChatSession, AIChatTurn, DeepReadingDraft, PaperQAResponse, RetrievalMode, TargetLanguage, TranslationResult } from "./types";
 
 export async function askPaperQuestion(input: {
   paperId: string;
@@ -51,3 +51,8 @@ export async function deleteAIAnalysis(analysisId: string): Promise<void> {
 export async function applyAIAnalysis(analysisId: string, request: AIAnalysisApplyRequest): Promise<{ application_id: string; analysis_id: string; profile: ResearchProfileResponse }> {
   return (await api.post(`/ai/analyses/${analysisId}/apply`, request)).data;
 }
+export async function listChatSessions(paperId:string){return (await api.get<AIChatSession[]>(`/papers/${paperId}/chat-sessions`)).data;}
+export async function createChatSession(paperId:string,scopeType:"page"|"paper"="paper"){return (await api.post<AIChatSession>(`/papers/${paperId}/chat-sessions`,{title:"新对话",scope_type:scopeType})).data;}
+export async function listChatMessages(sessionId:string){return (await api.get<AIChatMessage[]>(`/chat-sessions/${sessionId}/messages`)).data;}
+export async function sendChatMessage(sessionId:string,content:string,scopeType:"page"|"paper",pageNumber:number){return (await api.post<AIChatTurn>(`/chat-sessions/${sessionId}/messages`,{content,scope_type:scopeType,page_number:scopeType==="page"?pageNumber:undefined})).data;}
+export async function saveChatMessageAsNote(messageId:string){return (await api.post(`/chat-messages/${messageId}/save-as-note`)).data;}

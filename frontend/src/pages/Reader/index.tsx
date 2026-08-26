@@ -1,5 +1,5 @@
 import { AlertCircle, FileText } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
@@ -24,6 +24,10 @@ import { ReaderSidebar, type ReaderSideTab } from "@/features/reader/components/
 import { ReaderToolbar } from "@/features/reader/components/ReaderToolbar";
 import { usePdfOutline } from "@/features/reader/hooks/usePdfOutline";
 import { useReaderStore } from "@/stores/readerStore";
+import { BilingualPage } from "@/features/translation/BilingualPage";
+import { useTranslatePage, useTranslationPage } from "@/features/translation/hooks";
+import type { ReaderMode } from "@/features/translation/types";
+import { TranslationScopeMenu } from "@/features/translation/TranslationScopeMenu";
 
 export default function Reader() {
   const { paperId } = useParams<{ paperId: string }>();
@@ -60,7 +64,10 @@ function ReaderContent() {
   const [evidenceAnnotation, setEvidenceAnnotation] = useState<Annotation | null>(null);
   const [outlineMode, setOutlineMode] = useState<"native" | "parsed" | "references" | "elements">("native");
   const [sideTab, setSideTab] = useState<ReaderSideTab>("annotations");
+  const [readerMode, setReaderMode] = useState<ReaderMode>(() => (localStorage.getItem("reader.mode") as ReaderMode) || "original");
+  const [splitRatio, setSplitRatio] = useState(() => Math.min(70,Math.max(30,Number(localStorage.getItem("reader.split"))||50)));
   const [translationState, setTranslationState] = useState<{ text: string | null; targetLanguage: TargetLanguage; result: TranslationResult | null; pending: boolean; error: string | null }>({ text: null, targetLanguage: "zh-CN", result: null, pending: false, error: null });
+  const annotationTimerRef = useRef<number>();
   const activePdf = loadedPdf && loadedPdf.paperId === paperId && loadedPdf.documentId === documentId ? loadedPdf.pdf : null;
   const activeAnnotationId = activeAnnotation && activeAnnotation.paperId === paperId ? activeAnnotation.id : null;
   const areaMode = areaModeState !== null && areaModeState.paperId === paperId && areaModeState.enabled;
@@ -84,6 +91,16 @@ function ReaderContent() {
     initialPage: requestedPage,
     setCurrentPage,
   });
+  const translationPage = useTranslationPage(paperId, documentId, currentPage, readerMode !== "original");
+  const translatePageMutation = useTranslatePage(paperId ?? "", documentId ?? "", currentPage);
+
+  const changeReaderMode = (mode: ReaderMode) => { setReaderMode(mode); localStorage.setItem("reader.mode",mode); };
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const container=event.currentTarget.parentElement;if(!container)return;
+    const move=(e:PointerEvent)=>{const rect=container.getBoundingClientRect();const next=Math.min(70,Math.max(30,((e.clientX-rect.left)/rect.width)*100));setSplitRatio(next);localStorage.setItem("reader.split",String(Math.round(next)))};
+    const up=()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",up)};
+    window.addEventListener("pointermove",move);window.addEventListener("pointerup",up);
+  };
 
   useEffect(() => {
     reset();
@@ -104,6 +121,8 @@ function ReaderContent() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [paperId]);
+
+  useEffect(() => () => window.clearTimeout(annotationTimerRef.current), []);
 
   const handleDocumentLoad = useCallback((document: PDFDocumentProxy) => {
     if (paperId && documentId) setLoadedPdf({ paperId, documentId, pdf: document });
@@ -129,7 +148,8 @@ function ReaderContent() {
     setCurrentPage(annotation.page_number);
     if (!paperId) return;
     setActiveAnnotation({ paperId, id: annotation.id });
-    window.setTimeout(() => setActiveAnnotation((current) => current?.id === annotation.id ? null : current), 1100);
+    window.clearTimeout(annotationTimerRef.current);
+    annotationTimerRef.current = window.setTimeout(() => setActiveAnnotation((current) => current?.id === annotation.id ? null : current), 1100);
   };
   const updateAnnotationComment = (annotationId: string, input: UpdateAnnotationInput) => updateAnnotation.mutate({ annotationId, input });
   const runTranslation = async (text: string, targetLanguage: TargetLanguage) => {
@@ -177,6 +197,9 @@ function ReaderContent() {
       isParsePending={parseDocument.isPending}
       onParse={() => parseDocument.mutate(activeDocumentId)}
       onEditPaper={() => setEditingPaper(true)}
+      readerMode={readerMode}
+      onReaderModeChange={changeReaderMode}
+      translationControls={<TranslationScopeMenu paperId={paper.id} documentId={activeDocumentId} pageNumber={currentPage} sectionId={parsedSections.find((section) => section.page_start !== null && section.page_end !== null && section.page_start <= currentPage && section.page_end >= currentPage)?.id} />}
     />
     <div className="flex min-h-0 flex-1">
       <div className="flex min-h-0 shrink-0 flex-col">
@@ -188,7 +211,11 @@ function ReaderContent() {
         </div>
         {outlineMode === "native" ? <OutlinePanel items={outline} isLoading={isOutlineLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "parsed" ? <ParsedSectionPanel sections={parsedSections} isLoading={parsedSectionsLoading} activePage={currentPage} onJumpToPage={setCurrentPage} /> : outlineMode === "references" ? <ParsedReferencePanel references={parsedReferences} isLoading={parsedReferencesLoading} onJumpToPage={setCurrentPage} onOpenPaper={(targetPaperId) => navigate(`/reader/${targetPaperId}`)} /> : <ParsedElementPanel elements={parsedElements} isLoading={parsedElementsLoading} onJumpToPage={setCurrentPage} />}
       </div>
-      <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} onTranslateSelection={handleTranslateSelection} />
+      {readerMode === "original" ? <PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} onTranslateSelection={handleTranslateSelection} /> : readerMode === "translation" ? <div className="min-w-0 flex-1 overflow-y-auto bg-slate-100 dark:bg-slate-950"><BilingualPage data={translationPage.data} mode={readerMode} pending={translatePageMutation.isPending} onTranslate={()=>translatePageMutation.mutate()} /></div> : <div className="flex min-w-0 flex-1 max-md:flex-col">
+        <div className="flex min-h-0 min-w-0" style={{flexBasis:`${splitRatio}%`}}><PDFViewer fileUrl={pdfUrl} annotations={annotations} activeAnnotationId={activeAnnotationId} areaMode={areaMode} onDocumentLoad={handleDocumentLoad} onCreateTextAnnotation={createTextAnnotation} onCreateAreaAnnotation={createAreaAnnotation} onAnnotationClick={jumpToAnnotation} onTranslateSelection={handleTranslateSelection} /></div>
+        <div role="separator" aria-label="调整原译文比例" className="w-1 shrink-0 cursor-col-resize bg-gray-200 hover:bg-primary-400 max-md:hidden dark:bg-slate-700" onPointerDown={startResize}/>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950"><BilingualPage data={translationPage.data} mode={readerMode} pending={translatePageMutation.isPending} onTranslate={()=>translatePageMutation.mutate()} /></div>
+      </div>}
       <ReaderSidebar paperId={paper.id} annotations={annotations} isLoading={annotationsLoading} areaMode={areaMode} activeTab={sideTab} translationText={translationState.text} translationResult={translationState.result} translationPending={translationState.pending} translationError={translationState.error} onTabChange={setSideTab} onRetryTranslation={() => { if (translationState.text) void runTranslation(translationState.text, translationState.targetLanguage); }} onOpenCitation={openCitation} onToggleAreaMode={() => paperId && setAreaModeState({ paperId, enabled: !areaMode })} onJumpTo={jumpToAnnotation} onUpdate={updateAnnotationComment} onDelete={(annotationId) => deleteAnnotation.mutate(annotationId)} onAddToNote={setEvidenceAnnotation} />
     </div>
     {editingPaper && <EditPaperDialog paper={paper} onClose={() => setEditingPaper(false)} onDelete={async (target) => { await deletePaper.mutateAsync(target.id); navigate("/library", { replace: true }); }} />}

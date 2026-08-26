@@ -25,6 +25,10 @@ export interface PaperQAResponse {
   requested_mode: RetrievalMode;
   effective_mode: RetrievalMode;
 }
+export interface AIChatSession { id:string; paper_id:string; title:string; scope_type:"selection"|"page"|"section"|"paper"; scope_snapshot:Record<string,unknown>|null; model_id:string|null; created_at:string; updated_at:string; last_message_at:string|null; }
+export interface AIMessageCitation { id:string; paper_id:string; section_id:string|null; chunk_id:string|null; page_block_id:string|null; page_number:number|null; quote_text:string; bounding_box:Record<string,number>|null; citation_order:number; }
+export interface AIChatMessage { id:string; session_id:string; role:"user"|"assistant"; content:string; status:string; request_record_id:string|null; input_scope_snapshot:Record<string,unknown>|null; created_at:string; citations:AIMessageCitation[]; }
+export interface AIChatTurn { user_message:AIChatMessage; assistant_message:AIChatMessage; }
 
 export interface TranslationResult {
   translated_text: string;

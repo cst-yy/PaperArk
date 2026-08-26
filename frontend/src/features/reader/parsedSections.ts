@@ -25,5 +25,6 @@ export function useParsedSections(documentId?: string) {
     queryFn: () => getParsedSections(documentId!),
     enabled: Boolean(documentId),
     staleTime: 60_000,
+    gcTime: 60_000,
   });
 }

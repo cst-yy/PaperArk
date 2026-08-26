@@ -4,6 +4,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.exceptions import KeywordNotFoundError
 from app.core.taxonomy import normalize_taxonomy_name
 from app.repositories.keyword_repository import KeywordRepository
 from app.schemas.keyword import KeywordInput, KeywordResponse
@@ -26,6 +27,12 @@ class KeywordService:
             display_name=item.name.strip(),
             normalized_name=normalize_taxonomy_name(item.name),
         )
+
+    async def delete_keyword(self, user_id: uuid.UUID, keyword_id: uuid.UUID) -> None:
+        keyword = await self.repo.get_for_user(keyword_id, user_id)
+        if not keyword:
+            raise KeywordNotFoundError(f"Keyword {keyword_id} not found")
+        await self.repo.delete(keyword)
 
 
 def get_keyword_service(db: AsyncSession = Depends(get_db)) -> KeywordService:

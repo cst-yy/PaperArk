@@ -1,0 +1,6 @@
+import { useMutation,useQuery,useQueryClient } from "@tanstack/react-query";import {createTodo,deleteTodo,listTodos,updateTodo} from "./api";import type{Todo,TodoCreate,TodoPatch}from"./types";
+export const TODO_KEY=["dashboard","todos"] as const;
+export function useTodos(){return useQuery({queryKey:TODO_KEY,queryFn:listTodos});}
+export function useCreateTodo(){const q=useQueryClient();return useMutation({mutationFn:(d:TodoCreate)=>createTodo(d),onSuccess:(item)=>q.setQueryData<Todo[]>(TODO_KEY,(old=[])=>[item,...old])});}
+export function useUpdateTodo(){const q=useQueryClient();return useMutation({mutationFn:({id,data}:{id:string;data:TodoPatch})=>updateTodo(id,data),onMutate:async({id,data})=>{await q.cancelQueries({queryKey:TODO_KEY});const before=q.getQueryData<Todo[]>(TODO_KEY);q.setQueryData<Todo[]>(TODO_KEY,(old=[])=>old.map(x=>x.id===id?{...x,...data}:x));return{before};},onError:(_e,_v,c)=>q.setQueryData(TODO_KEY,c?.before),onSuccess:(item)=>q.setQueryData<Todo[]>(TODO_KEY,(old=[])=>{if(item.completed)return old.filter(x=>x.id!==item.id);return old.some(x=>x.id===item.id)?old.map(x=>x.id===item.id?item:x):[item,...old];})});}
+export function useDeleteTodo(){const q=useQueryClient();return useMutation({mutationFn:deleteTodo,onSuccess:(_v,id)=>q.setQueryData<Todo[]>(TODO_KEY,(old=[])=>old.filter(x=>x.id!==id))});}

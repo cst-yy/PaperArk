@@ -37,13 +37,12 @@ class CitationGraphService:
                     break
             candidate_ids = set(distances)
         else:
-            workspace_edges = await self.repo.workspace_edges(user_id)
-            candidate_ids = {
-                value for edge in workspace_edges
-                for value in (edge.source_paper_id, edge.target_paper_id)
-            }
+            candidate_ids, total_nodes = await self.repo.workspace_node_selection(
+                user_id, limit_nodes
+            )
 
-        total_nodes = len(candidate_ids)
+        if paper_id is not None:
+            total_nodes = len(candidate_ids)
         incoming, outgoing = await self.repo.degree_counts(user_id, candidate_ids)
         papers = await self.repo.papers(user_id, candidate_ids)
         paper_map = {paper.id: paper for paper in papers}
@@ -55,7 +54,11 @@ class CitationGraphService:
                 return (distances[value], -degree, -paper.updated_at.timestamp(), str(value))
             return (-degree, -paper.updated_at.timestamp(), str(value))
 
-        selected_ids = set(sorted(paper_map, key=priority)[:limit_nodes])
+        selected_ids = (
+            set(sorted(paper_map, key=priority)[:limit_nodes])
+            if paper_id is not None
+            else set(paper_map)
+        )
         # Root priority is distance zero, so it cannot be removed by truncation.
         selected_papers = sorted((paper_map[value] for value in selected_ids), key=lambda item: priority(item.id))
         edges = await self.repo.induced_edges(user_id, selected_ids)

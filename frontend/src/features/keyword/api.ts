@@ -4,3 +4,7 @@ import type { Keyword } from "./types";
 export async function listKeywords(): Promise<Keyword[]> {
   return (await api.get<Keyword[]>("/keywords/")).data;
 }
+
+export async function deleteKeyword(keywordId: string): Promise<void> {
+  await api.delete(`/keywords/${keywordId}`);
+}

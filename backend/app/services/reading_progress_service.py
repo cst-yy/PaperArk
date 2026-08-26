@@ -43,6 +43,11 @@ class ReadingProgressService:
             current_page=data.current_page,
             total_pages=data.total_pages,
             progress_ratio=data.current_page / data.total_pages,
+            reading_time_seconds_delta=data.reading_time_seconds_delta,
+        )
+        await self.repo.upsert_daily_activity(
+            user_id=user_id, paper_id=paper_id, document_id=data.document_id,
+            reading_time_seconds_delta=data.reading_time_seconds_delta,
         )
         # This automatic transition is intentionally conditional: concurrent or
         # delayed progress writes cannot overwrite finished/archived choices.

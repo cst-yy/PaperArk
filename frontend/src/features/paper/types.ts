@@ -43,6 +43,9 @@ export interface DocumentBrief {
 export interface Paper {
   id: string;
   title: string;
+  title_zh?: string | null;
+  citation_text?: string | null;
+  metadata_revision: number;
   abstract?: string | null;
   doi?: string | null;
   arxiv_id?: string | null;

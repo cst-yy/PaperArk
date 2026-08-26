@@ -28,6 +28,7 @@ from app.models import Document
 from app.parsers.chunker import SectionChunker
 from app.parsers.element_detector import ElementDetector
 from app.parsers.pdf_parser import PDFParser
+from app.parsers.page_block_detector import PageBlockDetector
 from app.parsers.reference_matcher import ReferenceMatcher
 from app.parsers.reference_metadata_parser import ReferenceMetadataParser
 from app.parsers.reference_segmenter import ReferenceSegmenter
@@ -49,6 +50,7 @@ class DocumentParseService:
         reference_segmenter: ReferenceSegmenter | None = None,
         reference_metadata_parser: ReferenceMetadataParser | None = None,
         element_detector: ElementDetector | None = None,
+        page_block_detector: PageBlockDetector | None = None,
     ):
         self.db = db
         self.repo = DocumentRepository(db)
@@ -58,6 +60,7 @@ class DocumentParseService:
         self.reference_segmenter = reference_segmenter or ReferenceSegmenter()
         self.reference_metadata_parser = reference_metadata_parser or ReferenceMetadataParser()
         self.element_detector = element_detector or ElementDetector()
+        self.page_block_detector = page_block_detector or PageBlockDetector()
 
     async def get_parse_status(self, user_id: uuid.UUID, document_id: uuid.UUID) -> Document:
         document = await self.repo.get_by_id(document_id, user_id)
@@ -93,7 +96,8 @@ class DocumentParseService:
             matcher = ReferenceMatcher(self.db)
             references = [(reference, await matcher.match(user_id, reference)) for reference in metadata]
             elements = self.element_detector.detect(parsed, sections)
-            snapshot = DerivedDocumentSnapshot(sections=sections, chunks=chunks, references=references, elements=elements)
+            page_blocks = self.page_block_detector.detect(parsed)
+            snapshot = DerivedDocumentSnapshot(sections=sections, chunks=chunks, references=references, elements=elements, page_blocks=page_blocks)
             DocumentDerivedService.validate(document, snapshot)
         except Exception as exc:
             logger.exception("Document %s parsing/derivation failed", document_id)

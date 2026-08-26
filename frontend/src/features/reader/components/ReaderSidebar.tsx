@@ -49,7 +49,7 @@ export function ReaderSidebar(props: Props) {
       {notes.data?.map((note) => <Link key={note.id} to={`/notes/${note.id}`} className="mb-1 block truncate rounded px-2 py-2 text-xs hover:bg-gray-100 dark:hover:bg-slate-800">{note.title}</Link>)}
       {!notes.isLoading && !notes.data?.length && <p className="text-xs text-gray-400">暂无关联笔记</p>}
     </div>}
-    {props.activeTab === "ai" && <AIPanel paperId={props.paperId} translationText={props.translationText} translationResult={props.translationResult} translationPending={props.translationPending} translationError={props.translationError} onRetryTranslation={props.onRetryTranslation} onOpenCitation={props.onOpenCitation} />}
+    {props.activeTab === "ai" && <AIPanel paperId={props.paperId} pageNumber={currentPage} translationText={props.translationText} translationResult={props.translationResult} translationPending={props.translationPending} translationError={props.translationError} onRetryTranslation={props.onRetryTranslation} onOpenCitation={props.onOpenCitation} />}
   </aside>;
 }
 

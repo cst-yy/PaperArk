@@ -20,6 +20,7 @@ export function useAnnotations(
     queryKey: paperId ? annotationQueryKey(paperId, documentId, pageNumber) : ["annotations", "disabled"],
     queryFn: () => listAnnotations(paperId!, documentId, pageNumber),
     enabled: Boolean(paperId && documentId),
+    gcTime: 60_000,
   });
 }
 

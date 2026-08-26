@@ -8,7 +8,8 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import DocumentParseError
-from app.models import Chunk, Document, DocumentElement, Reference, Section
+from app.models import Chunk, Document, DocumentElement, PageBlock, Reference, Section
+from app.parsers.page_block_detector import DetectedPageBlock
 from app.parsers.chunker import DerivedChunk
 from app.parsers.element_detector import DetectedElement
 from app.parsers.reference_matcher import ReferenceMatch
@@ -24,6 +25,7 @@ class DerivedDocumentSnapshot:
     chunks: list[DerivedChunk]
     references: list[tuple[ParsedReference, ReferenceMatch]]
     elements: list[DetectedElement] = field(default_factory=list)
+    page_blocks: list[DetectedPageBlock] = field(default_factory=list)
 
 
 class DocumentDerivedService:
@@ -36,6 +38,7 @@ class DocumentDerivedService:
             # Explicit child-first replacement preserves the whole old snapshot on
             # any later flush failure, under the caller's savepoint.
             await self.db.execute(delete(DocumentElement).where(DocumentElement.document_id == document.id))
+            await self.db.execute(delete(PageBlock).where(PageBlock.document_id == document.id))
             await self.db.execute(delete(Reference).where(Reference.document_id == document.id))
             await self.db.execute(delete(Chunk).where(Chunk.document_id == document.id))
             await self.db.execute(delete(Section).where(Section.document_id == document.id))
@@ -101,6 +104,18 @@ class DocumentDerivedService:
                         source="pdf", confidence=element.confidence,
                     )
                 )
+            sections_by_page = sorted(snapshot.sections, key=lambda item: (-item.level, item.order_index))
+            for block in snapshot.page_blocks:
+                section_id = next((item.id for item in sections_by_page if item.page_start <= block.page_number <= item.page_end), None)
+                self.db.add(PageBlock(
+                    id=block.id, document_id=document.id, paper_id=document.paper_id,
+                    section_id=section_id,
+                    page_number=block.page_number, block_order=block.block_order,
+                    reading_order=block.reading_order, block_type=block.block_type,
+                    column_index=block.column_index, bounding_box=block.bounding_box,
+                    source_text=block.source_text, normalized_text=block.normalized_text,
+                    source_hash=block.source_hash, parser_version="page-block-v1",
+                ))
             await self.db.flush()
         except Exception as exc:
             raise DocumentParseError(f"derived_data_replace_error: {exc}") from exc
@@ -110,6 +125,7 @@ class DocumentDerivedService:
         sections = snapshot.sections
         chunks = snapshot.chunks
         references = snapshot.references
+        page_blocks = snapshot.page_blocks
         section_ids = {section.id for section in sections}
         if len(section_ids) != len(sections):
             raise DocumentParseError("section order contains duplicate identities")
@@ -170,6 +186,10 @@ class DocumentDerivedService:
                 raise DocumentParseError("reference DOI is invalid")
             if reference.year is not None and not (1800 <= reference.year <= 2100):
                 raise DocumentParseError("reference year is invalid")
+        if len({(b.page_number, b.block_order) for b in page_blocks}) != len(page_blocks):
+            raise DocumentParseError("page block order contains duplicates")
+        if any(not b.normalized_text or b.page_number < 1 or b.page_number > document.page_count for b in page_blocks):
+            raise DocumentParseError("page block content or page is invalid")
 
 
 async def replace_document_derivatives(

@@ -22,6 +22,8 @@ class GenerationResult:
     finish_reason: str | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    cached_prompt_tokens: int | None = None
+    provider_request_id: str | None = None
 
 
 class GenerationProvider(Protocol):
@@ -84,6 +86,8 @@ class OpenAICompatibleGenerationProvider:
                 finish_reason=choice.get("finish_reason"),
                 prompt_tokens=usage.get("prompt_tokens"),
                 completion_tokens=usage.get("completion_tokens"),
+                cached_prompt_tokens=(usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+                provider_request_id=payload.get("id"),
             )
         except GenerationProviderError:
             raise

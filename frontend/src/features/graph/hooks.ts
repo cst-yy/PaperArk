@@ -3,20 +3,20 @@ import { decideSuggestion, generateSuggestions, getCitationEdge, getCitationGrap
 import type { GraphLayout, Point } from "./types";
 
 export function useCitationGraph(paperId: string | undefined, depth: 1 | 2) {
-  return useQuery({ queryKey: ["citation-graph", paperId ?? "workspace", depth], queryFn: () => getCitationGraph({ paperId, depth }) });
+  return useQuery({ queryKey: ["citation-graph", paperId ?? "workspace", depth], queryFn: () => getCitationGraph({ paperId, depth }), gcTime: 60_000 });
 }
 
 export function useCitationEdge(relationId?: string) {
-  return useQuery({ queryKey: ["citation-edge", relationId ?? "none"], queryFn: () => getCitationEdge(relationId!), enabled: Boolean(relationId) });
+  return useQuery({ queryKey: ["citation-edge", relationId ?? "none"], queryFn: () => getCitationEdge(relationId!), enabled: Boolean(relationId), gcTime: 60_000 });
 }
 
 export function useKnowledgeGraph(paperId: string | undefined, depth: 1 | 2, relationTypes: string[], origins: string[]) {
-  return useQuery({ queryKey: ["knowledge-graph", paperId ?? "workspace", depth, relationTypes, origins], queryFn: () => getKnowledgeGraph({ paperId, depth, relationTypes, origins }) });
+  return useQuery({ queryKey: ["knowledge-graph", paperId ?? "workspace", depth, relationTypes, origins], queryFn: () => getKnowledgeGraph({ paperId, depth, relationTypes, origins }), gcTime: 60_000 });
 }
-export function useKnowledgeRelation(id?: string) { return useQuery({ queryKey: ["knowledge-relation", id], queryFn: () => getRelation(id!), enabled: Boolean(id) }); }
-export function useGraphLayout(graphType: GraphLayout["graph_type"], scopeKey: string) { return useQuery({ queryKey: ["graph-layout", graphType, scopeKey], queryFn: () => getGraphLayout(graphType, scopeKey) }); }
+export function useKnowledgeRelation(id?: string) { return useQuery({ queryKey: ["knowledge-relation", id], queryFn: () => getRelation(id!), enabled: Boolean(id), gcTime: 60_000 }); }
+export function useGraphLayout(graphType: GraphLayout["graph_type"], scopeKey: string) { return useQuery({ queryKey: ["graph-layout", graphType, scopeKey], queryFn: () => getGraphLayout(graphType, scopeKey), gcTime: 60_000 }); }
 export function useSaveGraphLayout() { const client = useQueryClient(); return useMutation({ mutationFn: ({ graphType, scopeKey, positions }: { graphType: GraphLayout["graph_type"]; scopeKey: string; positions: Record<string, Point> }) => saveGraphLayout(graphType, scopeKey, positions), onSuccess: (data) => client.setQueryData(["graph-layout", data.graph_type, data.scope_key], data) }); }
-export function useSuggestions(paperId?: string) { return useQuery({ queryKey: ["relation-suggestions", paperId], queryFn: () => listSuggestions(paperId!), enabled: Boolean(paperId) }); }
+export function useSuggestions(paperId?: string) { return useQuery({ queryKey: ["relation-suggestions", paperId], queryFn: () => listSuggestions(paperId!), enabled: Boolean(paperId), gcTime: 60_000 }); }
 export function useGenerateSuggestions(paperId?: string) { const client = useQueryClient(); return useMutation({ mutationFn: () => generateSuggestions(paperId!), onSuccess: () => client.invalidateQueries({ queryKey: ["relation-suggestions", paperId] }) }); }
 export function useDecideSuggestion(paperId?: string) { const client = useQueryClient(); return useMutation({ mutationFn: ({ id, decision }: { id: string; decision: "accept" | "reject" }) => decideSuggestion(id, decision), onSuccess: () => { client.invalidateQueries({ queryKey: ["relation-suggestions", paperId] }); client.invalidateQueries({ queryKey: ["knowledge-graph"] }); } }); }
-export function useMindMap(paperId?: string) { return useQuery({ queryKey: ["mind-map", paperId], queryFn: () => getMindMap(paperId!), enabled: Boolean(paperId) }); }
+export function useMindMap(paperId?: string) { return useQuery({ queryKey: ["mind-map", paperId], queryFn: () => getMindMap(paperId!), enabled: Boolean(paperId), gcTime: 60_000 }); }

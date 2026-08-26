@@ -25,7 +25,7 @@ const historyKey = (paperId: string) => ["papers", paperId, "ai-analyses"] as co
 
 export function DeepReadingPanel({ paperId, onOpenCitation }: { paperId: string; onOpenCitation: (citation: AICitation) => void }) {
   const client = useQueryClient();
-  const history = useQuery({ queryKey: historyKey(paperId), queryFn: () => listAIAnalyses(paperId) });
+  const history = useQuery({ queryKey: historyKey(paperId), queryFn: () => listAIAnalyses(paperId), gcTime: 60_000 });
   const [draft, setDraft] = useState<DeepReadingDraft | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

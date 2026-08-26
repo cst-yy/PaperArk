@@ -2,9 +2,9 @@ import { AlertTriangle, LoaderCircle, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useFolders } from "@/features/folder/hooks";
-import { useKeywords } from "@/features/keyword/hooks";
+import { useDeleteKeyword, useKeywords } from "@/features/keyword/hooks";
 import { PaperKeywordSelector } from "@/features/keyword/components/PaperKeywordSelector";
-import { useCreateTag, useTags } from "@/features/tag/hooks";
+import { useCreateTag, useDeleteTag, useTags, useUpdateTag } from "@/features/tag/hooks";
 import type { Paper } from "../types";
 import { useSavePaperMetadata } from "../hooks";
 import { AuthorEditor } from "./AuthorEditor";
@@ -38,7 +38,10 @@ export function EditPaperDialog({ paper, onClose, onDelete }: EditPaperDialogPro
   const tags = useTags();
   const folders = useFolders();
   const keywords = useKeywords();
+  const deleteKeyword = useDeleteKeyword();
   const createTag = useCreateTag();
+  const updateTag = useUpdateTag();
+  const deleteTag = useDeleteTag();
   const save = useSavePaperMetadata();
   const [title, setTitle] = useState(paper.title);
   const [abstract, setAbstract] = useState(paper.abstract ?? "");
@@ -56,6 +59,10 @@ export function EditPaperDialog({ paper, onClose, onDelete }: EditPaperDialogPro
   const [keywordInputs, setKeywordInputs] = useState(paper.keywords.filter((keyword) => keyword.sources.includes("manual")).map((keyword) => ({ name: keyword.display_name })));
   const [newTagName, setNewTagName] = useState("");
   const [newTagError, setNewTagError] = useState<string | null>(null);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState("");
+  const [editingTagColor, setEditingTagColor] = useState("#6366f1");
+  const [editingTagError, setEditingTagError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -94,6 +101,44 @@ export function EditPaperDialog({ paper, onClose, onDelete }: EditPaperDialogPro
       setIsDeleting(false);
     }
   };
+  const openTagEditor = (tag: import("@/features/tag/types").Tag) => {
+    setEditingTagId(tag.id);
+    setEditingTagName(tag.name);
+    setEditingTagColor(tag.color || "#6366f1");
+    setEditingTagError(null);
+  };
+  const saveEditedTag = async () => {
+    if (!editingTagId || !editingTagName.trim()) return;
+    setEditingTagError(null);
+    try {
+      await updateTag.mutateAsync({ tagId: editingTagId, data: { name: editingTagName.trim(), color: editingTagColor } });
+      setEditingTagId(null);
+    } catch (error) {
+      setEditingTagError(messageFromError(error));
+    }
+  };
+  const removeEditedTag = async () => {
+    if (!editingTagId) return;
+    const tag = tags.data?.find((item) => item.id === editingTagId);
+    if (!window.confirm(`删除“${tag?.name ?? editingTagName}”不会删除论文，只会解除它与所有论文的关联。确定删除吗？`)) return;
+    setEditingTagError(null);
+    try {
+      await deleteTag.mutateAsync(editingTagId);
+      setTagIds((ids) => ids.filter((id) => id !== editingTagId));
+      setEditingTagId(null);
+    } catch (error) {
+      setEditingTagError(messageFromError(error));
+    }
+  };
+  const removeKeywordSuggestion = async (keyword: import("@/features/keyword/types").Keyword) => {
+    if (!window.confirm(`永久删除关键词“${keyword.display_name}”吗？这会同时解除它与所有论文的关联，且无法恢复。`)) return;
+    setSaveError(null);
+    try {
+      await deleteKeyword.mutateAsync(keyword.id);
+    } catch (error) {
+      setSaveError(`删除关键词失败：${messageFromError(error)}`);
+    }
+  };
 
   const handleSave = async () => {
     setSaveError(null);
@@ -125,9 +170,10 @@ export function EditPaperDialog({ paper, onClose, onDelete }: EditPaperDialogPro
         <section className="space-y-3"><h3 className="text-sm font-semibold">基本信息</h3><label className="block text-sm"><span className="mb-1 block text-gray-600 dark:text-gray-300">标题 *</span><input className="input" value={title} disabled={disabled} onChange={(event) => setTitle(event.target.value)} /></label><label className="block text-sm"><span className="mb-1 block text-gray-600 dark:text-gray-300">摘要</span><textarea className="input min-h-28 resize-y" value={abstract} disabled={disabled} onChange={(event) => setAbstract(event.target.value)} /></label><div className="grid gap-3 md:grid-cols-2"><Field label="DOI" value={doi} disabled={disabled} onChange={setDoi} /><Field label="arXiv ID" value={arxivId} disabled={disabled} onChange={setArxivId} /></div><Field label="URL" value={url} disabled={disabled} onChange={setUrl} /></section>
         <section className="space-y-3"><h3 className="text-sm font-semibold">出版信息</h3><div className="grid gap-3 md:grid-cols-2"><Field label="年份" type="number" value={year} disabled={disabled} onChange={setYear} /><Field label="引用次数" type="number" value={citationCount} disabled={disabled} onChange={setCitationCount} /><Field label="期刊" value={journal} disabled={disabled} onChange={setJournal} /><Field label="会议" value={conference} disabled={disabled} onChange={setConference} /></div><Field label="出版商" value={publisher} disabled={disabled} onChange={setPublisher} /></section>
         <AuthorEditor authors={authors} disabled={disabled} onChange={setAuthors} />
-        <PaperKeywordSelector value={keywordInputs} suggestions={(keywords.data ?? []).map((keyword) => keyword.display_name)} disabled={disabled} onChange={setKeywordInputs} />
-        <PaperTagSelector tags={tags.data ?? []} selectedIds={tagIds} disabled={disabled || createTag.isPending} onChange={setTagIds} onCreate={() => document.getElementById("quick-tag-name")?.focus()} />
+        <PaperKeywordSelector value={keywordInputs} suggestions={keywords.data ?? []} disabled={disabled} deletingKeywordId={deleteKeyword.variables ?? null} onChange={setKeywordInputs} onDeleteSuggestion={(keyword) => void removeKeywordSuggestion(keyword)} />
+        <PaperTagSelector tags={tags.data ?? []} selectedIds={tagIds} disabled={disabled || createTag.isPending || updateTag.isPending || deleteTag.isPending} onChange={setTagIds} onCreate={() => document.getElementById("quick-tag-name")?.focus()} onEdit={openTagEditor} />
         <div className="flex gap-2"><input id="quick-tag-name" className="input" placeholder="新标签名称" value={newTagName} disabled={disabled || createTag.isPending} onChange={(event) => setNewTagName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void createQuickTag(); } }} /><button type="button" className="btn-ghost border border-gray-200 text-sm" disabled={!newTagName.trim() || disabled || createTag.isPending} onClick={() => void createQuickTag()}>{createTag.isPending ? "创建中…" : "创建并选择"}</button></div>{newTagError && <p className="text-xs text-red-600">{newTagError}</p>}
+        {editingTagId && <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-800"><div className="mb-2 flex items-center justify-between"><h4 className="text-sm font-medium">编辑标签</h4><button type="button" className="btn-ghost p-1" aria-label="关闭标签编辑" onClick={() => setEditingTagId(null)}><X className="h-4 w-4" /></button></div><div className="flex items-center gap-2"><input className="input h-9 flex-1 text-sm" aria-label="标签名称" value={editingTagName} disabled={updateTag.isPending || deleteTag.isPending} onChange={(event) => setEditingTagName(event.target.value)} /><input type="color" aria-label="标签颜色" className="h-9 w-12 cursor-pointer rounded border border-gray-200 bg-white p-1" value={editingTagColor} disabled={updateTag.isPending || deleteTag.isPending} onChange={(event) => setEditingTagColor(event.target.value)} /><button type="button" className="btn-primary h-9 text-sm" disabled={!editingTagName.trim() || updateTag.isPending || deleteTag.isPending} onClick={() => void saveEditedTag()}>{updateTag.isPending ? "保存中…" : "保存标签"}</button><button type="button" className="btn-ghost h-9 text-sm text-red-600 hover:bg-red-50" disabled={updateTag.isPending || deleteTag.isPending} onClick={() => void removeEditedTag()}>{deleteTag.isPending ? "删除中…" : "删除"}</button></div>{editingTagError && <p className="mt-2 text-xs text-red-600">{editingTagError}</p>}</div>}
         <PaperFolderSelector folders={folders.data ?? []} selectedIds={folderIds} disabled={disabled} onChange={setFolderIds} />
       </div></div>
       <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-6 py-4 dark:border-slate-700"><div>{onDelete && <button type="button" className="btn-ghost inline-flex items-center gap-2 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30" disabled={disabled} onClick={() => void handleDelete()}><Trash2 className="h-4 w-4" />{isDeleting ? "删除中…" : "删除论文"}</button>}</div><div className="flex items-center gap-2"><button type="button" className="btn-ghost" disabled={disabled} onClick={requestClose}>取消</button><button type="button" className="btn-primary inline-flex items-center gap-2" disabled={disabled} onClick={() => void handleSave()}>{save.isPending && <LoaderCircle className="h-4 w-4 animate-spin" />}{save.isPending ? "保存中…" : "保存"}</button></div></div>

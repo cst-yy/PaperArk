@@ -1,0 +1,6 @@
+export type ReaderMode = "original" | "layout" | "paragraph" | "translation";
+export interface PageBlock { id:string; document_id:string; paper_id:string; section_id:string|null; page_number:number; block_order:number; reading_order:number; block_type:string; column_index:number|null; bounding_box:{x:number;y:number;width:number;height:number}|null; source_text:string; source_hash:string; }
+export interface TranslationBlock { id:string; page_block_id:string|null; source_hash:string; machine_translation:string|null; user_translation:string|null; effective_translation:string|null; status:string; revision:number; translated_at:string|null; }
+export interface TranslationPage { translation:{id:string;status:string;target_language:string}|null; blocks:PageBlock[]; translations:TranslationBlock[]; }
+export interface TranslationEstimate { total_blocks:number; reusable_blocks:number; pending_blocks:number; source_characters:number; estimated_input_tokens:number; estimated_output_tokens:number; estimated_cost:string|null; currency:string|null; price_available:boolean; }
+export interface TranslationJob { id:string; status:string; total_blocks:number; completed_blocks:number; failed_blocks:number; estimated_cost:string|null; actual_cost:string|null; }

@@ -45,6 +45,12 @@ class DuplicateTagError(DomainError):
 class FolderNotFoundError(DomainError):
     """Raised when a folder doesn't exist or belongs to another user."""
 
+class TodoNotFoundError(DomainError):
+    """Raised when a todo is missing or belongs to another user."""
+
+class MemoNotFoundError(DomainError):
+    """Raised when a memo is missing or belongs to another user."""
+
 
 class InvalidTagError(DomainError):
     """Raised when one or more tags don't exist or belong to another user."""
@@ -52,6 +58,10 @@ class InvalidTagError(DomainError):
 
 class InvalidKeywordError(DomainError):
     """Raised when one or more keywords don't exist or belong to another user."""
+
+
+class KeywordNotFoundError(DomainError):
+    """Raised when a keyword doesn't exist or belongs to another user."""
 
 
 class InvalidFolderError(DomainError):
@@ -133,7 +143,7 @@ class InvalidAIAnalysisError(DomainError):
 
 
 class RevisionConflictError(DomainError):
-    """Raised when a research profile changed after the user reviewed it."""
+    """Raised when an optimistic revision changed after the user loaded it."""
 
 
 class PaperRelationNotFoundError(DomainError):

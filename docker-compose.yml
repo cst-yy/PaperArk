@@ -31,6 +31,7 @@ services:
 
   backend:
     build: ./backend
+    image: paperark-backend:local
     container_name: paper_workspace_backend
     environment:
       DATABASE_URL: postgresql+asyncpg://paper:paper123@db:5432/paper_workspace
@@ -73,6 +74,28 @@ services:
     depends_on:
       - backend
     command: npm run dev -- --host 0.0.0.0
+
+  ai-worker:
+    build: ./backend
+    image: paperark-backend:local
+    container_name: paper_workspace_ai_worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://paper:paper123@db:5432/paper_workspace
+      REDIS_URL: redis://redis:6379/0
+      WORKSPACE_DIR: /workspace
+      STORAGE_DIR: /workspace/storage
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+    volumes:
+      - ./backend:/app
+      - "${WORKSPACE_DIR}:/workspace"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app.celery_app worker -Q ai --loglevel=INFO --concurrency=2
 
 volumes:
   redisdata:

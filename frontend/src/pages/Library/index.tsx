@@ -24,6 +24,7 @@ export default function Library() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [editingPaperId, setEditingPaperId] = useState<string | null>(null);
+  const [recentReadingExpanded, setRecentReadingExpanded] = useState(false);
 
   const { data: tags } = useTags();
   const { data: folders } = useFolders();
@@ -34,7 +35,7 @@ export default function Library() {
   const unstarMut = useUnstarPaper();
   const createPaperMut = useCreatePaper();
   const deletePaperMut = useDeletePaper();
-  const { data: recentReading = [], isLoading: recentReadingLoading } = useRecentReading(5);
+  const { data: recentReading = [], isLoading: recentReadingLoading } = useRecentReading(recentReadingExpanded ? 10 : 2);
 
   const papers = paperPage?.items ?? [];
 
@@ -51,7 +52,7 @@ export default function Library() {
   const clearFilter = () => setSearchParams(clearLibraryFilters());
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="w-full p-6">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -78,7 +79,12 @@ export default function Library() {
         </div>
       </div>
 
-      <RecentReadingList items={recentReading} isLoading={recentReadingLoading} />
+      <RecentReadingList
+        items={recentReading}
+        isLoading={recentReadingLoading}
+        expanded={recentReadingExpanded}
+        onToggleExpanded={() => setRecentReadingExpanded((expanded) => !expanded)}
+      />
 
       {/* Toolbar */}
       <div className="mb-4 flex items-center gap-3">
@@ -111,14 +117,14 @@ export default function Library() {
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 md:grid-cols-3 dark:border-slate-700 dark:bg-slate-800">
-        <label className="text-xs text-gray-600 dark:text-gray-300">文件夹<select className="input mt-1 h-9 text-sm" value={query.folder_id ?? ""} onChange={(event) => updateFilter({ folder_id: event.target.value || undefined })}><option value="">全部文件夹</option>{flattenFolders(folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
-        <label className="text-xs text-gray-600 dark:text-gray-300">标签<select className="input mt-1 h-9 text-sm" value={query.tag_id ?? ""} onChange={(event) => updateFilter({ tag_id: event.target.value || undefined })}><option value="">全部标签</option>{tags?.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select></label>
-        <label className="text-xs text-gray-600 dark:text-gray-300">年份<input className="input mt-1 h-9 text-sm" type="number" min="1000" max="9999" placeholder="全部年份" value={query.year ?? ""} onChange={(event) => updateFilter({ year: event.target.value ? Number(event.target.value) : undefined })} /></label>
-        <label className="text-xs text-gray-600 dark:text-gray-300">处理状态<select className="input mt-1 h-9 text-sm" value={query.status ?? ""} onChange={(event) => updateFilter({ status: event.target.value as typeof query.status || undefined })}><option value="">全部状态</option><option value="imported">已导入</option><option value="processing">解析中</option><option value="ready">就绪</option><option value="failed">失败</option></select></label>
-        <label className="text-xs text-gray-600 dark:text-gray-300">阅读状态<select className="input mt-1 h-9 text-sm" value={query.reading_status ?? ""} onChange={(event) => updateFilter({ reading_status: event.target.value as typeof query.reading_status || undefined })}><option value="">全部阅读状态</option><option value="unread">未读</option><option value="reading">阅读中</option><option value="finished">已读</option><option value="archived">已归档</option></select></label>
-        <label className="flex items-end gap-2 pb-2 text-sm text-gray-700 dark:text-gray-200"><input type="checkbox" checked={Boolean(query.starred)} onChange={(event) => updateFilter({ starred: event.target.checked || undefined })} />仅显示收藏</label>
-        <label className="text-xs text-gray-600 dark:text-gray-300">每页数量<select className="input mt-1 h-9 text-sm" value={query.page_size} onChange={(event) => updateFilter({ page_size: Number(event.target.value) })}><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+      <div className="mb-4 flex items-center gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+        <select aria-label="文件夹" className="input h-9 min-w-32 flex-1 text-sm" value={query.folder_id ?? ""} onChange={(event) => updateFilter({ folder_id: event.target.value || undefined })}><option value="">全部文件夹</option>{flattenFolders(folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select>
+        <select aria-label="标签" className="input h-9 min-w-32 flex-1 text-sm" value={query.tag_id ?? ""} onChange={(event) => updateFilter({ tag_id: event.target.value || undefined })}><option value="">全部标签</option>{tags?.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>
+        <input aria-label="年份" className="input h-9 min-w-28 flex-1 text-sm" type="number" min="1000" max="9999" placeholder="全部年份" value={query.year ?? ""} onChange={(event) => updateFilter({ year: event.target.value ? Number(event.target.value) : undefined })} />
+        <select aria-label="处理状态" className="input h-9 min-w-32 flex-1 text-sm" value={query.status ?? ""} onChange={(event) => updateFilter({ status: event.target.value as typeof query.status || undefined })}><option value="">全部处理状态</option><option value="imported">已导入</option><option value="processing">解析中</option><option value="ready">就绪</option><option value="failed">失败</option></select>
+        <select aria-label="阅读状态" className="input h-9 min-w-32 flex-1 text-sm" value={query.reading_status ?? ""} onChange={(event) => updateFilter({ reading_status: event.target.value as typeof query.reading_status || undefined })}><option value="">全部阅读状态</option><option value="unread">未读</option><option value="reading">阅读中</option><option value="finished">已读</option><option value="archived">已归档</option></select>
+        <label className="flex h-9 min-w-max items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-200"><input type="checkbox" checked={Boolean(query.starred)} onChange={(event) => updateFilter({ starred: event.target.checked || undefined })} />仅收藏</label>
+        <select aria-label="每页数量" title="每页数量" className="input h-9 w-24 shrink-0 text-sm" value={query.page_size} onChange={(event) => updateFilter({ page_size: Number(event.target.value) })}><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select>
       </div>
 
       {/* Papers */}

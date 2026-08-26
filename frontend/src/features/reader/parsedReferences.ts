@@ -30,5 +30,6 @@ export function useParsedReferences(documentId?: string) {
     queryFn: () => getParsedReferences(documentId!),
     enabled: Boolean(documentId),
     staleTime: 60_000,
+    gcTime: 60_000,
   });
 }

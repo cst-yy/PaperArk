@@ -12,6 +12,7 @@ export interface ReadingProgressUpsert {
   document_id: string;
   current_page: number;
   total_pages: number;
+  reading_time_seconds_delta?: number;
 }
 
 export interface RecentReadingItem {

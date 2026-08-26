@@ -5,37 +5,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_current_user_id, get_db
+from app.core.exceptions import FolderNotFoundError, RevisionConflictError
 from app.models import Folder, PaperFolder
-from pydantic import BaseModel
+from app.schemas.folder import FolderCreate, FolderUpdate, FolderResponse
+from app.services.folder_service import FolderService
 
 router = APIRouter()
-
-
-class FolderCreate(BaseModel):
-    name: str
-    parent_id: uuid.UUID | None = None
-    color: str | None = None
-    icon: str | None = None
-
-
-class FolderUpdate(BaseModel):
-    name: str | None = None
-    color: str | None = None
-    icon: str | None = None
-    parent_id: uuid.UUID | None = None
-
-
-class FolderResponse(BaseModel):
-    id: uuid.UUID
-    name: str
-    parent_id: uuid.UUID | None = None
-    color: str | None = None
-    icon: str | None = None
-    sort_order: int
-    paper_count: int = 0
-    children: list["FolderResponse"] = []
-
-    model_config = {"from_attributes": True}
 
 
 async def _count_papers(db: AsyncSession, folder_id: uuid.UUID) -> int:
@@ -73,6 +48,7 @@ async def list_folders(
             color=f.color,
             icon=f.icon,
             sort_order=f.sort_order,
+            revision=f.revision,
             paper_count=counts.get(f.id, 0),
         )
         folder_map[f.id] = resp
@@ -93,15 +69,8 @@ async def create_folder(
     db: AsyncSession = Depends(get_db),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
-    folder = Folder(
-        user_id=user_id,
-        name=data.name,
-        parent_id=data.parent_id,
-        color=data.color,
-        icon=data.icon,
-    )
-    db.add(folder)
-    await db.flush()
+    try: folder = await FolderService(db).create(user_id, data)
+    except (FolderNotFoundError, ValueError) as error: raise HTTPException(status_code=400, detail=str(error))
     return FolderResponse(
         id=folder.id,
         name=folder.name,
@@ -109,6 +78,7 @@ async def create_folder(
         color=folder.color,
         icon=folder.icon,
         sort_order=folder.sort_order,
+        revision=folder.revision,
     )
 
 
@@ -119,15 +89,10 @@ async def update_folder(
     db: AsyncSession = Depends(get_db),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
-    folder = await db.get(Folder, folder_id)
-    if not folder or folder.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Folder not found")
-
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(folder, key, value)
-
-    await db.flush()
+    try: folder = await FolderService(db).update(user_id, folder_id, data)
+    except FolderNotFoundError as error: raise HTTPException(status_code=404, detail=str(error))
+    except RevisionConflictError as error: raise HTTPException(status_code=409, detail=str(error))
+    except ValueError as error: raise HTTPException(status_code=400, detail=str(error))
     return FolderResponse(
         id=folder.id,
         name=folder.name,
@@ -135,6 +100,7 @@ async def update_folder(
         color=folder.color,
         icon=folder.icon,
         sort_order=folder.sort_order,
+        revision=folder.revision,
     )
 
 
@@ -144,10 +110,8 @@ async def delete_folder(
     db: AsyncSession = Depends(get_db),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
-    folder = await db.get(Folder, folder_id)
-    if not folder or folder.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    await db.delete(folder)
+    try: await FolderService(db).delete(user_id, folder_id)
+    except FolderNotFoundError as error: raise HTTPException(status_code=404, detail=str(error))
     return {"message": "Folder deleted"}
 
 

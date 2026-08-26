@@ -23,7 +23,7 @@ export async function upsertReadingProgress(
   return response.data;
 }
 
-export async function getRecentReading(limit = 5): Promise<RecentReadingItem[]> {
+export async function getRecentReading(limit = 2): Promise<RecentReadingItem[]> {
   const response = await api.get<RecentReadingItem[]>("/reading/recent", {
     params: { limit },
   });

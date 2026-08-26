@@ -3,12 +3,13 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.core.exceptions import DuplicateTagError, InvalidFolderError, InvalidTagError, PaperNotFoundError
-from app.models import Folder, Keyword, Paper, PaperAuthor, PaperFolder, PaperKeyword, Tag, User
+from app.core.exceptions import DuplicateTagError, InvalidFolderError, InvalidTagError, KeywordNotFoundError, PaperNotFoundError
+from app.models import Document, Folder, Keyword, Paper, PaperAuthor, PaperFolder, PaperKeyword, Tag, User
 from app.schemas.keyword import KeywordInput, KeywordReplacement
 from app.schemas.paper import AuthorBrief, PaperMetadataReplaceRequest
 from app.schemas.tag import TagCreate, TagUpdate
 from app.services.paper_service import PaperMapper, PaperService
+from app.services.keyword_service import KeywordService
 from app.services.tag_service import TagService
 
 
@@ -17,6 +18,35 @@ async def create_user(session, suffix: str) -> uuid.UUID:
     session.add(User(id=user_id, username=f"user-{suffix}", email=f"{suffix}@example.com", password_hash=""))
     await session.flush()
     return user_id
+
+
+@pytest.mark.asyncio
+async def test_paper_detail_eager_loads_complete_document_brief(session):
+    user_id = await create_user(session, "detail-document")
+    paper = Paper(user_id=user_id, title="Reader detail", status="ready")
+    session.add(paper)
+    await session.flush()
+    document = Document(
+        paper_id=paper.id,
+        file_path="pdfs/reader-detail.pdf",
+        original_filename="reader-detail.pdf",
+        file_size=1234,
+        mime_type="application/pdf",
+        parse_status="ready",
+        parser_version="test-parser",
+    )
+    session.add(document)
+    await session.commit()
+
+    response = PaperMapper.to_detail_response(
+        await PaperService(session).get_paper(user_id, paper.id)
+    )
+
+    assert response.document is not None
+    assert response.document.id == document.id
+    assert response.document.original_filename == "reader-detail.pdf"
+    assert response.document.file_size == 1234
+    assert response.document.parser_version == "test-parser"
 
 
 @pytest.mark.asyncio
@@ -32,6 +62,29 @@ async def test_tag_normalized_duplicate_and_rename_duplicate(session):
     other = await service.create_tag(user_id, TagCreate(name="Privacy"))
     with pytest.raises(DuplicateTagError):
         await service.update_tag(user_id, other.id, TagUpdate(name="FEDERATED LEARNING"))
+
+
+@pytest.mark.asyncio
+async def test_keyword_delete_is_owner_scoped_and_removes_paper_links(session):
+    owner_id = await create_user(session, "keyword-delete-owner")
+    other_id = await create_user(session, "keyword-delete-other")
+    paper = Paper(user_id=owner_id, title="Keyword cleanup")
+    session.add(paper)
+    await session.flush()
+    service = KeywordService(session)
+    keyword = await service.get_or_create(owner_id, KeywordInput(name="Malformed keyword"))
+    session.add(PaperKeyword(paper_id=paper.id, keyword_id=keyword.id, source="metadata"))
+    await session.flush()
+
+    with pytest.raises(KeywordNotFoundError):
+        await service.delete_keyword(other_id, keyword.id)
+
+    await service.delete_keyword(owner_id, keyword.id)
+    await session.flush()
+
+    assert await session.get(Keyword, keyword.id) is None
+    links = (await session.execute(select(PaperKeyword).where(PaperKeyword.keyword_id == keyword.id))).scalars().all()
+    assert links == []
 
 
 @pytest.mark.asyncio

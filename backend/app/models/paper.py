@@ -26,6 +26,8 @@ class Paper(Base):
     )
 
     title: Mapped[str] = mapped_column(Text)
+    title_zh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    citation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     arxiv_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
@@ -37,6 +39,9 @@ class Paper(Base):
     publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     citation_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
 
     pdf_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_path: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -47,6 +52,9 @@ class Paper(Base):
     reading_status: Mapped[str] = mapped_column(
         String(20), default="unread", server_default="unread", index=True
     )  # unread | reading | finished | archived
+    ai_access_policy: Mapped[str] = mapped_column(
+        String(20), default="allow_cloud", server_default="allow_cloud"
+    )  # allow_cloud | local_only | disabled
 
     is_starred: Mapped[bool] = mapped_column(default=False)
     notes_count: Mapped[int] = mapped_column(Integer, default=0)

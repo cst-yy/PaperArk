@@ -11,7 +11,7 @@ export function useReadingProgress(paperId?: string, documentId?: string) {
   });
 }
 
-export function useRecentReading(limit = 5) {
+export function useRecentReading(limit = 2) {
   return useQuery({
     queryKey: ["reading", "recent", limit],
     queryFn: () => getRecentReading(limit),

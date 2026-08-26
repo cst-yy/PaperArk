@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import PaperNotFoundError
@@ -106,3 +107,42 @@ async def test_deterministic_truncation_keeps_root_and_filters_induced_edges(ses
     assert [node.paper_id for node in first.nodes] == [node.paper_id for node in second.nodes]
     selected = {node.paper_id for node in first.nodes}
     assert all(edge.source_paper_id in selected and edge.target_paper_id in selected for edge in first.edges)
+
+
+@pytest.mark.asyncio
+async def test_workspace_graph_query_count_is_constant_for_scale_fixture(
+    session: AsyncSession,
+) -> None:
+    owner = await make_user(session, "graph-scale")
+    papers = [await make_paper(session, owner, f"Scale {index:03}") for index in range(80)]
+    session.add_all([
+        PaperRelation(
+            user_id=owner.id,
+            source_paper_id=papers[index].id,
+            target_paper_id=papers[index + 1].id,
+            relation_type="cites",
+            origin="reference",
+        )
+        for index in range(len(papers) - 1)
+    ])
+    await session.commit()
+
+    query_count = 0
+
+    def count_query(*_args) -> None:
+        nonlocal query_count
+        query_count += 1
+
+    sync_engine = session.bind.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", count_query)
+    try:
+        graph = await CitationGraphService(session).graph(
+            owner.id, paper_id=None, depth=1, limit_nodes=20
+        )
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", count_query)
+
+    assert graph.total_nodes == 80
+    assert graph.truncated is True
+    assert len(graph.nodes) == 20
+    assert query_count <= 8

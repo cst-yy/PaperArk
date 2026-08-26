@@ -1,0 +1,11 @@
+import {api} from "@/services/api";import type{AIBudget,AIModel,AIProvider,AIRequestPage,AIUsageSummary}from"./types";
+export const listProviders=async()=>(await api.get<AIProvider[]>("/ai/providers")).data;
+export const createProvider=async(data:{name:string;base_url:string;api_key:string;is_local:boolean})=>(await api.post<AIProvider>("/ai/providers",data)).data;
+export const testProvider=async(id:string)=>(await api.post<{ok:boolean;message:string}>(`/ai/providers/${id}/test`)).data;
+export const listModels=async()=>(await api.get<AIModel[]>("/ai/models")).data;
+export const createModel=async(data:{provider_id:string;model_name:string;display_name?:string})=>(await api.post<AIModel>("/ai/models",data)).data;
+export const addPricing=async(id:string,data:{currency:string;input_per_million:number;cached_input_per_million?:number;output_per_million:number})=>(await api.post(`/ai/models/${id}/pricing`,data)).data;
+export const usageSummary=async()=>(await api.get<AIUsageSummary>("/ai/usage/summary")).data;
+export const usageRequests=async(page=1)=>(await api.get<AIRequestPage>("/ai/usage/requests",{params:{page,page_size:20}})).data;
+export const listBudgets=async()=>(await api.get<AIBudget[]>("/ai/budgets")).data;
+export const createBudget=async(data:{scope_type:string;period_type:string;token_limit:number|null;cost_limit:number|null;currency:string;hard_limit:boolean;warning_threshold:number;enabled:boolean})=>(await api.post<AIBudget>("/ai/budgets",data)).data;

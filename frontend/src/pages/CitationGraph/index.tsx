@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, ExternalLink, Focus, Loader2, Network } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -9,6 +9,7 @@ import type { Point } from "@/features/graph/types";
 export default function CitationGraphPage() {
   const navigate = useNavigate(); const [params, setParams] = useSearchParams(); const paperId = params.get("paper_id") || undefined; const depth: 1 | 2 = params.get("depth") === "2" ? 2 : 1;
   const graph = useCitationGraph(paperId, depth); const scopeKey = `${paperId ? `paper:${paperId}` : "workspace"}:depth:${depth}`; const layout = useGraphLayout("citation", scopeKey); const save = useSaveGraphLayout(); const timer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(timer.current), []);
   const [nodeId, setNodeId] = useState<string>(); const [edgeId, setEdgeId] = useState<string>(); const detail = useCitationEdge(edgeId); const node = graph.data?.nodes.find((item) => item.paper_id === nodeId);
   const nodes: CanvasNode[] = (graph.data?.nodes ?? []).map((item) => ({ id: item.paper_id, title: item.title, subtitle: `${item.publication_year ?? "年份未知"} · 入 ${item.incoming_count} / 出 ${item.outgoing_count}`, root: item.paper_id === paperId }));
   const edges: CanvasEdge[] = (graph.data?.edges ?? []).map((item) => ({ id: item.relation_id, source: item.source_paper_id, target: item.target_paper_id, label: "引用", origin: "reference", kind: "cites" }));

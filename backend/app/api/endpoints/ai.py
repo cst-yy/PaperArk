@@ -25,6 +25,7 @@ from app.schemas.deep_reading import (
 from app.services.ai_service import AIService
 from app.services.deep_reading_service import DeepReadingService
 from app.services.ai_analysis_service import AIAnalysisService
+from app.services.ai_gateway import AIBudgetExceededError
 
 router = APIRouter()
 
@@ -44,6 +45,8 @@ async def answer_paper_question(
         return await AIService(db, provider).answer_paper_question(user_id, request)
     except (PaperNotFoundError, RAGContextError) as exc:
         raise HTTPException(status_code=404, detail=exc.message) from exc
+    except AIBudgetExceededError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     except (GenerationProviderError, SemanticRetrievalError) as exc:
         raise HTTPException(status_code=503, detail="AI service is temporarily unavailable") from exc
 
@@ -52,10 +55,13 @@ async def answer_paper_question(
 async def translate_selection(
     request: TranslationRequest,
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
     provider: GenerationProvider = Depends(get_generation_provider),
 ):
     try:
-        return await AIService(db, provider).translate_selection(request)
+        return await AIService(db, provider).translate_user_selection(user_id, request)
+    except AIBudgetExceededError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     except GenerationProviderError as exc:
         raise HTTPException(status_code=503, detail="AI service is temporarily unavailable") from exc
 
@@ -71,6 +77,8 @@ async def generate_deep_reading(
         return await DeepReadingService(db, provider).generate(user_id, request)
     except RAGContextError as exc:
         raise HTTPException(status_code=404, detail=exc.message) from exc
+    except AIBudgetExceededError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     except (GenerationProviderError, SemanticRetrievalError, StructuredGenerationError) as exc:
         raise HTTPException(status_code=503, detail="AI structured analysis is temporarily unavailable") from exc
 

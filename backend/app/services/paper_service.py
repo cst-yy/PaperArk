@@ -27,6 +27,7 @@ from app.core.exceptions import (
     InvalidFolderError,
     InvalidTagError,
     PaperNotFoundError,
+    RevisionConflictError,
     StorageError,
     TagNotFoundError,
 )
@@ -38,10 +39,11 @@ from app.core.storage import (
     validate_pdf,
 )
 from app.models import Paper
+from app.parsers.paper_metadata_extractor import ExtractedPaperMetadata, PaperMetadataExtractor
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.paper_repository import PaperRepository, normalize_orcid
 from app.services.reference_resolution_service import ReferenceResolutionService
-from app.schemas.keyword import KeywordReplacement, PaperKeywordBrief
+from app.schemas.keyword import KeywordInput, KeywordReplacement, PaperKeywordBrief
 from app.services.keyword_service import KeywordService
 from app.schemas.document import DocumentBrief
 from app.schemas.paper import (
@@ -119,6 +121,8 @@ class PaperMapper:
         return PaperResponse(
             id=paper.id,
             title=paper.title,
+            title_zh=paper.title_zh,
+            citation_text=paper.citation_text,
             abstract=paper.abstract,
             doi=paper.doi,
             arxiv_id=paper.arxiv_id,
@@ -135,6 +139,7 @@ class PaperMapper:
             is_starred=paper.is_starred,
             created_at=paper.created_at,
             updated_at=paper.updated_at,
+            metadata_revision=paper.metadata_revision,
             authors=[
                 AuthorBrief(
                     id=pa.author.id,
@@ -403,7 +408,8 @@ class PaperService:
         if not paper:
             raise PaperNotFoundError(f"Paper {paper_id} not found")
 
-        update_data = data.model_dump(exclude_unset=True)
+        update_data = data.model_dump(exclude_unset=True, exclude={"expected_revision"})
+        expected_revision = data.expected_revision or paper.metadata_revision
 
         # Normalize DOI/arXiv on update
         if "doi" in update_data and update_data["doi"]:
@@ -430,7 +436,12 @@ class PaperService:
             if dup:
                 raise DuplicatePaperError(dup.title)
 
-        await self.repo.update(paper, **update_data)
+        if not await self.repo.update_metadata_if_revision(
+            paper, expected_revision, **update_data
+        ):
+            raise RevisionConflictError(
+                "论文信息已在其他页面发生修改，请刷新后重新编辑。"
+            )
 
         if identity_fields & update_data.keys():
             await ReferenceResolutionService(self.db).resolve_workspace_for_paper_change(
@@ -502,7 +513,9 @@ class PaperService:
         paper = await self.repo.get_raw(paper_id, user_id)
         if not paper:
             raise PaperNotFoundError(f"Paper {paper_id} not found")
-        return await self.repo.update(paper, reading_status=reading_status)
+        await self.repo.update(paper, reading_status=reading_status)
+        await self.repo.bump_metadata_revision(paper)
+        return paper
 
     # ────────────────── Star ──────────────────
 
@@ -514,6 +527,7 @@ class PaperService:
         if not paper:
             raise PaperNotFoundError(f"Paper {paper_id} not found")
         await self.repo.set_starred(paper, is_starred)
+        await self.repo.bump_metadata_revision(paper)
         return paper
 
     # ────────────────── Tag management ──────────────────
@@ -530,6 +544,7 @@ class PaperService:
             raise TagNotFoundError(f"Tag {tag_id} not found")
 
         await self.repo.add_tag(paper_id, tag_id)
+        await self.repo.bump_metadata_revision(paper)
 
     async def remove_tag(
         self, user_id: uuid.UUID, paper_id: uuid.UUID, tag_id: uuid.UUID
@@ -541,6 +556,7 @@ class PaperService:
         if not valid_tags:
             raise TagNotFoundError(f"Tag {tag_id} not found")
         await self.repo.remove_tag(paper_id, tag_id)
+        await self.repo.bump_metadata_revision(paper)
 
     async def replace_tags(
         self, user_id: uuid.UUID, paper_id: uuid.UUID, tag_ids: list[uuid.UUID]
@@ -552,6 +568,7 @@ class PaperService:
         if {tag.id for tag in valid_tags} != set(tag_ids):
             raise InvalidTagError("One or more tags do not exist or belong to another user")
         await self.repo.replace_tags(paper_id, tag_ids)
+        await self.repo.bump_metadata_revision(paper)
         return await self.get_paper(user_id, paper_id)
 
     # ────────────────── Folder management ──────────────────
@@ -570,6 +587,7 @@ class PaperService:
             raise FolderNotFoundError(f"Folder {folder_id} not found")
 
         await self.repo.add_folder(paper_id, folder_id)
+        await self.repo.bump_metadata_revision(paper)
 
     async def remove_folder(
         self, user_id: uuid.UUID, paper_id: uuid.UUID, folder_id: uuid.UUID
@@ -581,6 +599,7 @@ class PaperService:
         if not valid_folders:
             raise FolderNotFoundError(f"Folder {folder_id} not found")
         await self.repo.remove_folder(paper_id, folder_id)
+        await self.repo.bump_metadata_revision(paper)
 
     async def replace_folders(
         self, user_id: uuid.UUID, paper_id: uuid.UUID, folder_ids: list[uuid.UUID]
@@ -592,6 +611,7 @@ class PaperService:
         if {folder.id for folder in valid_folders} != set(folder_ids):
             raise InvalidFolderError("One or more folders do not exist or belong to another user")
         await self.repo.replace_folders(paper_id, folder_ids)
+        await self.repo.bump_metadata_revision(paper)
         return await self.get_paper(user_id, paper_id)
 
     async def replace_metadata_aggregate(
@@ -608,7 +628,7 @@ class PaperService:
             raise PaperNotFoundError(f"Paper {paper_id} not found")
 
         update_data = data.model_dump(
-            exclude={"authors", "tag_ids", "folder_ids", "keywords"}
+            exclude={"authors", "tag_ids", "folder_ids", "keywords", "expected_revision"}
         )
         update_data["doi"] = _normalize_text(data.doi)
         update_data["arxiv_id"] = _normalize_text(data.arxiv_id)
@@ -632,7 +652,12 @@ class PaperService:
 
         keyword_service = KeywordService(self.db)
         async with self.db.begin_nested():
-            await self.repo.update(paper, **update_data)
+            if not await self.repo.update_metadata_if_revision(
+                paper, data.expected_revision or paper.metadata_revision, **update_data
+            ):
+                raise RevisionConflictError(
+                    "论文信息已在其他页面发生修改，请刷新后重新编辑。"
+                )
             await self.repo.replace_authors(paper_id)
             await self._link_authors(paper_id, data.authors)
             await self.repo.replace_tags(paper_id, data.tag_ids)
@@ -651,6 +676,37 @@ class PaperService:
         self.db.expire(paper, ["authors", "tags", "keywords", "folder_assignments"])
         return await self.get_paper(user_id, paper_id)
 
+    async def delete_papers_atomic(
+        self, user_id: uuid.UUID, paper_ids: list[uuid.UUID]
+    ) -> int:
+        """Validate every owner, delete all DB aggregates once, then clean files."""
+        papers: list[Paper] = []
+        paths: set[str] = set()
+        for paper_id in paper_ids:
+            paper = await self.repo.get_raw(paper_id, user_id)
+            if paper is None:
+                raise PaperNotFoundError(f"Paper {paper_id} not found")
+            papers.append(paper)
+            documents = await self.doc_repo.list_by_paper(paper_id, user_id)
+            paths.update(document.file_path for document in documents if document.file_path)
+            if paper.pdf_path:
+                paths.add(paper.pdf_path)
+        for paper in papers:
+            await self.repo.delete(paper)
+        try:
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        for path in paths:
+            full_path = get_full_path(path)
+            if full_path.exists():
+                try:
+                    full_path.unlink()
+                except Exception as error:
+                    logger.warning("Failed to delete orphaned batch file %s: %s", path, error)
+        return len(papers)
+
     async def replace_keywords(
         self, user_id: uuid.UUID, paper_id: uuid.UUID, data: KeywordReplacement
     ) -> Paper:
@@ -668,6 +724,7 @@ class PaperService:
                 await keyword_service.repo.replace_manual_for_paper(
                     paper_id, [keyword.id for keyword in keywords]
                 )
+                await self.repo.bump_metadata_revision(paper)
         except Exception:
             raise
         self.db.expire(paper, ["keywords"])
@@ -683,6 +740,7 @@ class PaperService:
             async with self.db.begin_nested():
                 await self.repo.replace_authors(paper_id)
                 await self._link_authors(paper_id, authors)
+                await self.repo.bump_metadata_revision(paper)
         except Exception:
             # The outer request transaction remains usable; no partial PaperAuthor links survive.
             raise
@@ -722,15 +780,45 @@ class PaperService:
         original_filename = file.filename or "Untitled.pdf"
 
         # Derive title from filename (strip extension)
-        title = Path(original_filename).stem
+        fallback_title = Path(original_filename).stem
+        metadata = ExtractedPaperMetadata()
+        try:
+            metadata = await asyncio.to_thread(
+                PaperMetadataExtractor().extract, saved_path, fallback_title
+            )
+        except Exception as exc:
+            # Metadata quality must never become an upload availability problem.
+            logger.warning("PDF metadata extraction failed for %s: %s", original_filename, exc)
+
+        title = metadata.title or fallback_title
 
         try:
             # 3. Create Paper
             paper = await self.repo.create(
                 user_id=user_id,
                 title=title,
+                abstract=metadata.abstract,
+                doi=metadata.doi,
+                arxiv_id=metadata.arxiv_id,
+                journal=metadata.journal,
+                conference=metadata.conference,
+                publisher=metadata.publisher,
+                publication_year=metadata.publication_year,
                 pdf_path=relative_path,  # deprecated, kept for backward compat
                 status="imported",
+            )
+
+            await self._link_authors(
+                paper.id,
+                [AuthorBrief(name=author.name, affiliation=author.affiliation, author_order=index) for index, author in enumerate(metadata.authors)],
+            )
+            keyword_service = KeywordService(self.db)
+            keywords = [
+                await keyword_service.get_or_create(user_id, KeywordInput(name=name))
+                for name in metadata.keywords
+            ]
+            await keyword_service.repo.replace_source_for_paper(
+                paper.id, [keyword.id for keyword in keywords], "metadata"
             )
 
             # 4. Create Document — authoritative file reference

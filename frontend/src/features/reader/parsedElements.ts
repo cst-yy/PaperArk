@@ -24,5 +24,6 @@ export function useParsedElements(documentId?: string) {
     queryFn: () => getParsedElements(documentId!),
     enabled: Boolean(documentId),
     staleTime: 60_000,
+    gcTime: 60_000,
   });
 }

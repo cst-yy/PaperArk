@@ -1,8 +1,10 @@
 import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Pencil, Plus, RefreshCw, ScanLine } from "lucide-react";
 import { Link } from "react-router-dom";
+import type { ReactNode } from "react";
 
 import type { DocumentParseStatus, PaperReadingStatus } from "@/features/paper/types";
 import { useReaderStore } from "@/stores/readerStore";
+import type { ReaderMode } from "@/features/translation/types";
 
 interface ReaderToolbarProps {
   title: string;
@@ -14,6 +16,9 @@ interface ReaderToolbarProps {
   isParsePending?: boolean;
   onParse?: () => void;
   onEditPaper?: () => void;
+  readerMode: ReaderMode;
+  onReaderModeChange: (mode: ReaderMode) => void;
+  translationControls?: ReactNode;
 }
 
 export function ReaderToolbar({
@@ -26,6 +31,9 @@ export function ReaderToolbar({
   isParsePending = false,
   onParse,
   onEditPaper,
+  readerMode,
+  onReaderModeChange,
+  translationControls,
 }: ReaderToolbarProps) {
   const currentPage = useReaderStore((state) => state.currentPage);
   const totalPages = useReaderStore((state) => state.totalPages);
@@ -57,6 +65,24 @@ export function ReaderToolbar({
         {title}
       </h1>
 
+      <div className="hidden items-center rounded-md border border-gray-200 p-0.5 lg:flex dark:border-slate-700" aria-label="阅读模式">
+        {([['original','原文'],['layout','版面对照'],['paragraph','段落对照'],['translation','译文']] as const).map(([value,label])=><button key={value} type="button" onClick={()=>onReaderModeChange(value)} className={`rounded px-2 py-1 text-xs ${readerMode===value?'bg-primary-100 text-primary-700 dark:bg-primary-950/50 dark:text-primary-200':'text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800'}`}>{label}</button>)}
+      </div>
+      <label className="sr-only" htmlFor="reader-mode">阅读模式</label>
+      <select
+        id="reader-mode"
+        aria-label="阅读模式"
+        className="h-8 max-w-24 rounded-md border border-gray-200 bg-white px-1 text-xs lg:hidden dark:border-slate-700 dark:bg-slate-800"
+        value={readerMode}
+        onChange={(event) => onReaderModeChange(event.target.value as ReaderMode)}
+      >
+        <option value="original">原文</option>
+        <option value="layout">版面对照</option>
+        <option value="paragraph">段落对照</option>
+        <option value="translation">译文</option>
+      </select>
+      {translationControls}
+
       <label className="sr-only" htmlFor="reader-reading-status">阅读状态</label>
       <select
         id="reader-reading-status"
@@ -78,8 +104,8 @@ export function ReaderToolbar({
         {parseStatus === "ready" && "已解析"}
         {parseStatus === "failed" && `解析失败${parseError ? `：${parseError}` : ""}`}
       </span>
-      {(parseStatus === "pending" || parseStatus === "failed") && onParse && (
-        <button type="button" className="reader-toolbar-button" onClick={onParse} disabled={isParsePending} aria-label="重新解析 PDF" title={parseStatus === "failed" ? "重新解析 PDF" : "解析 PDF"}>
+      {onParse && (
+        <button type="button" className="reader-toolbar-button" onClick={onParse} disabled={isParsePending} aria-label="重新解析 PDF" title={parseStatus === "ready" ? "重新解析 PDF（生成最新页面分区）" : "解析 PDF"}>
           {isParsePending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         </button>
       )}

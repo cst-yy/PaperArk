@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrainCircuit, ExternalLink, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -12,6 +12,7 @@ export default function MindMapPage() {
   const navigate = useNavigate(); const [params, setParams] = useSearchParams(); const paperId = params.get("paper_id") || undefined;
   const papers = usePapers({ page_size: 100 }); const map = useMindMap(paperId); const scopeKey = paperId ? `paper:${paperId}` : "empty";
   const layout = useGraphLayout("mind_map", scopeKey); const save = useSaveGraphLayout(); const timer = useRef<number>(); const [selectedId, setSelectedId] = useState<string>();
+  useEffect(() => () => window.clearTimeout(timer.current), []);
   const selected = map.data?.nodes.find((node) => node.id === selectedId);
   const nodes: CanvasNode[] = (map.data?.nodes ?? []).map((node) => ({ id: node.id, title: node.title, subtitle: node.summary || node.node_type, kind: node.node_type, root: node.node_type === "paper" }));
   const edges: CanvasEdge[] = (map.data?.edges ?? []).map((edge, index) => ({ id: `${edge.source}:${edge.target}:${index}`, source: edge.source, target: edge.target, label: edge.relation === "supports" ? "supports" : undefined, kind: edge.relation === "supports" ? "supports" : "contains" }));

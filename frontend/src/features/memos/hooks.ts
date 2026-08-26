@@ -1,0 +1,5 @@
+import{useMutation,useQuery,useQueryClient}from"@tanstack/react-query";import{createMemo,deleteMemo,listMemos,updateMemo}from"./api";import type{Memo,MemoCreate,MemoPatch}from"./types";
+export const MEMO_KEY=["dashboard","memos"]as const;export function useMemos(){return useQuery({queryKey:MEMO_KEY,queryFn:listMemos});}
+export function useCreateMemo(){const q=useQueryClient();return useMutation({mutationFn:(d:MemoCreate)=>createMemo(d),onSuccess:i=>q.setQueryData<Memo[]>(MEMO_KEY,(o=[])=>[i,...o])});}
+export function useUpdateMemo(){const q=useQueryClient();return useMutation({mutationFn:({id,data}:{id:string;data:MemoPatch})=>updateMemo(id,data),onSuccess:i=>q.setQueryData<Memo[]>(MEMO_KEY,(o=[])=>[...o.filter(x=>x.id!==i.id),i].sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updated_at.localeCompare(a.updated_at))) });}
+export function useDeleteMemo(){const q=useQueryClient();return useMutation({mutationFn:deleteMemo,onSuccess:(_v,id)=>q.setQueryData<Memo[]>(MEMO_KEY,(o=[])=>o.filter(x=>x.id!==id))});}

@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+
 @layer base {
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
@@ -33,4 +34,7 @@
   .reader-side-tab-active {
     @apply border-primary-500 text-primary-600 dark:text-primary-100;
   }
+}
+.paper-list-filters-collapsed > header + div {
+  display: none;
 }

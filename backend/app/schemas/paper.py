@@ -34,6 +34,8 @@ class FolderBrief(BaseModel):
 
 class PaperBase(BaseModel):
     title: str
+    title_zh: str | None = None
+    citation_text: str | None = None
     abstract: str | None = None
     doi: str | None = None
     arxiv_id: str | None = None
@@ -109,6 +111,7 @@ class PaperMetadataReplaceRequest(PaperBase):
     tag_ids: list[UUID] = []
     folder_ids: list[UUID] = []
     keywords: list[KeywordInput] = []
+    expected_revision: int | None = None
 
     @field_validator("authors")
     @classmethod
@@ -126,7 +129,10 @@ class ReadingStatusUpdate(BaseModel):
 
 
 class PaperUpdate(BaseModel):
+    expected_revision: int | None = None
     title: str | None = None
+    title_zh: str | None = None
+    citation_text: str | None = None
     abstract: str | None = None
     doi: str | None = None
     arxiv_id: str | None = None
@@ -142,6 +148,8 @@ class PaperUpdate(BaseModel):
 class PaperResponse(ORMModel):
     id: UUID
     title: str
+    title_zh: str | None = None
+    citation_text: str | None = None
     abstract: str | None = None
     doi: str | None = None
     arxiv_id: str | None = None
@@ -158,6 +166,7 @@ class PaperResponse(ORMModel):
     is_starred: bool
     created_at: datetime
     updated_at: datetime
+    metadata_revision: int
     authors: list[AuthorBrief] = []
     tags: list[TagBrief] = []
     folders: list[FolderBrief] = []

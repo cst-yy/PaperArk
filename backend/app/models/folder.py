@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -9,6 +9,7 @@ from app.core.database import Base
 
 class Folder(Base):
     __tablename__ = "folders"
+    __table_args__ = (CheckConstraint("revision >= 1", name="ck_folders_revision_positive"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -23,6 +24,7 @@ class Folder(Base):
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     sort_order: Mapped[int] = mapped_column(default=0)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

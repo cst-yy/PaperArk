@@ -16,6 +16,7 @@ from app.schemas.rag import RAGContextRequest
 from app.services.citation_validator import CitationValidator
 from app.services.grounded_prompt import GroundedPromptBuilder, TranslationPromptBuilder
 from app.services.rag_service import RAGService
+from app.services.ai_gateway import AIGateway
 
 
 class AIService:
@@ -25,6 +26,7 @@ class AIService:
         generation_provider: GenerationProvider,
         embedding_provider: EmbeddingProvider | None = None,
     ):
+        self.db = db
         self.rag = RAGService(db, embedding_provider)
         self.papers = PaperRepository(db)
         self.generation_provider = generation_provider
@@ -53,8 +55,17 @@ class AIService:
     async def translate_selection(self, request: TranslationRequest) -> TranslationResult:
         result = await self.generation_provider.generate(
             self.translation_prompt_builder.build(request.text, request.target_language),
-            0.0,
-            settings.AI_MAX_OUTPUT_TOKENS,
+            0.0, settings.AI_MAX_OUTPUT_TOKENS,
+        )
+        return TranslationResult(translated_text=result.text.strip(), source_language=None,
+                                 target_language=request.target_language)
+
+    async def translate_user_selection(self, user_id: uuid.UUID, request: TranslationRequest) -> TranslationResult:
+        result, _ = await AIGateway(self.db).generate(
+            user_id=user_id, feature="selection_translation", operation="translate_selection",
+            messages=self.translation_prompt_builder.build(request.text, request.target_language),
+            temperature=0.0, max_tokens=settings.AI_MAX_OUTPUT_TOKENS,
+            fallback_provider=self.generation_provider,
         )
         return TranslationResult(
             translated_text=result.text.strip(),
@@ -76,11 +87,18 @@ class AIService:
                 effective_mode=context.effective_mode,
             )
 
-        result = await self.generation_provider.generate(
-            self.prompt_builder.build(context.query, context.sources),
-            settings.AI_TEMPERATURE,
-            settings.AI_MAX_OUTPUT_TOKENS,
-        )
+        if hasattr(self, "db"):
+            result, _ = await AIGateway(self.db).generate(
+                user_id=user_id, feature="paper_qa", operation="answer_question",
+                messages=self.prompt_builder.build(context.query, context.sources),
+                temperature=settings.AI_TEMPERATURE, max_tokens=settings.AI_MAX_OUTPUT_TOKENS,
+                paper_id=request.paper_id, fallback_provider=self.generation_provider,
+            )
+        else:  # isolated prompt/citation unit tests have no persistence layer
+            result = await self.generation_provider.generate(
+                self.prompt_builder.build(context.query, context.sources),
+                settings.AI_TEMPERATURE, settings.AI_MAX_OUTPUT_TOKENS,
+            )
         answer, declared_insufficient = self._parse_result(result.text)
         validated = self.citation_validator.validate(answer, context.sources)
         insufficient = declared_insufficient or not validated.citations

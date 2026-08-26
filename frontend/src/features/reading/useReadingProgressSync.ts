@@ -42,6 +42,7 @@ export function useReadingProgressSync({
     restoredKey: null as string | null,
     statusInvalidatedKey: null as string | null,
     initialPage: null as number | null,
+    lastTrackedAt: 0,
   });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const writeQueueRef = useRef(Promise.resolve());
@@ -56,10 +57,16 @@ export function useReadingProgressSync({
   const persist = useCallback(() => {
     const { scope, currentPage: page, totalPages: pages, ready } = stateRef.current;
     if (!scope || !ready || pages < 1) return;
+    const now = Date.now();
+    const readingTimeDelta = stateRef.current.lastTrackedAt
+      ? Math.max(0, Math.min(300, Math.floor((now - stateRef.current.lastTrackedAt) / 1000)))
+      : 0;
+    stateRef.current.lastTrackedAt = now;
     const payload = {
       document_id: scope.documentId,
       current_page: Math.max(1, Math.min(page, pages)),
       total_pages: pages,
+      reading_time_seconds_delta: readingTimeDelta,
     };
     writeQueueRef.current = writeQueueRef.current
       .catch(() => undefined)
@@ -90,6 +97,7 @@ export function useReadingProgressSync({
     state.statusInvalidatedKey = null;
     const requestedPage = initialPage;
     state.initialPage = Number.isInteger(requestedPage) && (requestedPage ?? 0) > 0 ? requestedPage! : null;
+    state.lastTrackedAt = Date.now();
 
     return () => {
       flush();
@@ -125,6 +133,7 @@ export function useReadingProgressSync({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") flush();
+      else stateRef.current.lastTrackedAt = Date.now();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
@@ -132,6 +141,13 @@ export function useReadingProgressSync({
       flush();
     };
   }, [flush]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") persist();
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [persist]);
 
   const restoreAfterDocumentLoad = async (pdf: PDFDocumentProxy) => {
     const scope = stateRef.current.scope;
@@ -162,6 +178,7 @@ export function useReadingProgressSync({
     } finally {
       if (stateRef.current.scope && scopeKey(stateRef.current.scope) === key) {
         stateRef.current.ready = true;
+        stateRef.current.lastTrackedAt = Date.now();
         stateRef.current.currentPage = Math.max(1, Math.min(
           stateRef.current.currentPage,
           pdf.numPages,

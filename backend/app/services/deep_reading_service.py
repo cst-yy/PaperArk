@@ -19,6 +19,7 @@ from app.services.deep_reading_prompt import DeepReadingPromptBuilder
 from app.services.deep_reading_retrieval import DeepReadingRetrievalService
 from app.services.ai_analysis_service import AIAnalysisService
 from app.services.structured_evidence_validator import StructuredEvidenceValidator
+from app.services.ai_gateway import AIGateway
 
 
 class DeepReadingService:
@@ -42,15 +43,20 @@ class DeepReadingService:
                 sources=[], source_count=0,
             )
 
-        final_result = await self.generation_provider.generate(
-            self.prompt.build(context.sources), settings.AI_TEMPERATURE,
-            settings.DEEP_READING_MAX_OUTPUT_TOKENS,
+        final_result, _ = await AIGateway(self.db).generate(
+            user_id=user_id, feature="deep_reading", operation="structured_analysis",
+            messages=self.prompt.build(context.sources), temperature=settings.AI_TEMPERATURE,
+            max_tokens=settings.DEEP_READING_MAX_OUTPUT_TOKENS, paper_id=request.paper_id,
+            fallback_provider=self.generation_provider,
         )
         try:
             payload = self._parse(final_result.text)
         except StructuredGenerationError:
-            final_result = await self.generation_provider.generate(
-                self.prompt.repair(final_result.text), 0.0, settings.DEEP_READING_MAX_OUTPUT_TOKENS
+            final_result, _ = await AIGateway(self.db).generate(
+                user_id=user_id, feature="deep_reading", operation="repair_structured_analysis",
+                messages=self.prompt.repair(final_result.text), temperature=0.0,
+                max_tokens=settings.DEEP_READING_MAX_OUTPUT_TOKENS, paper_id=request.paper_id,
+                fallback_provider=self.generation_provider,
             )
             payload = self._parse(final_result.text)
 

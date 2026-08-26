@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Document, Page } from "react-pdf";
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
+import { Document, Page as ReactPdfPage } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import "@/lib/pdf";
@@ -12,6 +12,15 @@ import { SelectionToolbar } from "@/features/reader/components/SelectionToolbar"
 import { useTextSelection } from "@/features/reader/hooks/useTextSelection";
 import { normalizeClientRect } from "@/features/reader/utils/rects";
 import { useReaderStore } from "@/stores/readerStore";
+
+const MAX_PDF_DEVICE_PIXEL_RATIO = 1.5;
+
+function Page(props: ComponentProps<typeof ReactPdfPage>) {
+  const devicePixelRatio = typeof window === "undefined"
+    ? 1
+    : Math.min(window.devicePixelRatio || 1, MAX_PDF_DEVICE_PIXEL_RATIO);
+  return <ReactPdfPage {...props} devicePixelRatio={devicePixelRatio} />;
+}
 
 interface PDFViewerProps {
   fileUrl: string;

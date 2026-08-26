@@ -82,6 +82,7 @@ export function useUnstarPaper() {
 
 function invalidatePaperData(queryClient: ReturnType<typeof useQueryClient>, paperId: string) {
   queryClient.invalidateQueries({ queryKey: ["papers"] });
+  queryClient.invalidateQueries({ queryKey: ["paper-list"] });
   queryClient.invalidateQueries({ queryKey: ["paper", paperId] });
   queryClient.invalidateQueries({ queryKey: ["folders"] });
   queryClient.invalidateQueries({ queryKey: ["tags"] });
@@ -151,6 +152,7 @@ export function useParseDocument() {
     mutationFn: parseDocument,
     onSuccess: (_, documentId) => {
       queryClient.invalidateQueries({ queryKey: ["papers"] });
+      queryClient.invalidateQueries({ queryKey: ["paper-list"] });
       queryClient.invalidateQueries({ queryKey: ["paper"] });
       queryClient.invalidateQueries({ queryKey: ["document-sections", documentId] });
       queryClient.invalidateQueries({ queryKey: ["document-references", documentId] });

@@ -2,7 +2,7 @@ import json
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import InvalidPaperRelationError
@@ -83,3 +83,42 @@ async def test_knowledge_graph_filters_bfs_cycles_induced_and_user_scope(session
     cites = await KnowledgeGraphService(session, {"cites"}, {"reference"}).graph(
         owner.id, paper_id=c.id, depth=1, limit_nodes=200)
     assert {node.paper_id for node in cites.nodes} == {c.id, d.id}
+
+
+@pytest.mark.asyncio
+async def test_workspace_knowledge_graph_query_count_is_constant_for_scale_fixture(
+    session: AsyncSession,
+):
+    owner = await make_user(session, "kg-scale")
+    papers = [await make_paper(session, owner, f"Scale {index:03}") for index in range(80)]
+    session.add_all([
+        PaperRelation(
+            user_id=owner.id,
+            source_paper_id=papers[index].id,
+            target_paper_id=papers[index + 1].id,
+            relation_type="extends",
+            origin="manual",
+        )
+        for index in range(len(papers) - 1)
+    ])
+    await session.commit()
+
+    query_count = 0
+
+    def count_query(*_args) -> None:
+        nonlocal query_count
+        query_count += 1
+
+    sync_engine = session.bind.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", count_query)
+    try:
+        graph = await KnowledgeGraphService(
+            session, {"extends"}, {"manual"}
+        ).graph(owner.id, paper_id=None, depth=1, limit_nodes=20)
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", count_query)
+
+    assert graph.total_nodes == 80
+    assert graph.truncated is True
+    assert len(graph.nodes) == 20
+    assert query_count <= 10

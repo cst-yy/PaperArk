@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field, field_validator
 class NodePosition(BaseModel):
     x: float = Field(ge=-100000, le=100000)
     y: float = Field(ge=-100000, le=100000)
+    width: float | None = Field(default=None, ge=80, le=2000)
+    height: float | None = Field(default=None, ge=40, le=1600)
+    background: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    text_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    font_size: float | None = Field(default=None, ge=9, le=32)
 
 
 class GraphLayoutSave(BaseModel):

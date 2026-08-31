@@ -26,3 +26,9 @@ export async function decideSuggestion(id: string, decision: "accept" | "reject"
 export async function getGraphLayout(graphType: GraphLayout["graph_type"], scopeKey: string) { return (await api.get<GraphLayout | null>("/graph/layout", { params: { graph_type: graphType, scope_key: scopeKey } })).data; }
 export async function saveGraphLayout(graphType: GraphLayout["graph_type"], scopeKey: string, positions: Record<string, Point>) { return (await api.put<GraphLayout>("/graph/layout", { graph_type: graphType, scope_key: scopeKey, positions })).data; }
 export async function getMindMap(paperId: string) { return (await api.get<MindMap>(`/papers/${paperId}/mind-map`)).data; }
+export async function createMindMapNode(paperId:string,input:{title:string;summary:string}){return(await api.post<MindMap>(`/papers/${paperId}/mind-map/nodes`,input)).data;}
+export async function updateMindMapNode(paperId:string,nodeId:string,input:{title:string;summary:string}){return(await api.put<MindMap>(`/papers/${paperId}/mind-map/nodes/${nodeId}`,input)).data;}
+export async function deleteMindMapNode(paperId:string,nodeId:string){return(await api.delete<MindMap>(`/papers/${paperId}/mind-map/nodes/${nodeId}`)).data;}
+export async function createMindMapEdge(paperId:string,input:{source:string;target:string;relation:string}){return(await api.post<MindMap>(`/papers/${paperId}/mind-map/edges`,input)).data;}
+export async function updateMindMapEdge(paperId:string,edgeId:string,relation:string){return(await api.put<MindMap>(`/papers/${paperId}/mind-map/edges/${edgeId}`,{relation})).data;}
+export async function deleteMindMapEdge(paperId:string,edgeId:string){return(await api.delete<MindMap>(`/papers/${paperId}/mind-map/edges/${edgeId}`)).data;}

@@ -1184,3 +1184,11 @@ PDF 解析会生成稳定的 `PageBlock` 阅读区域。翻译遵循“估算 �
 ```text
 docker compose up -d --build
 ```
+
+### My Papers — Research Identity & Author Roles
+
+“我的论文”现在按研究身份绑定的 `Author.id` 判断本人署名，不再等同于整个 Library，也不限制本人必须是第一作者。`PaperAuthor` 分别保存数组顺序、`is_co_first` 与 `is_corresponding`；第一作者继续由 `author_order == 0` 推导，允许多位共同一作和多位通讯作者。
+
+页面支持全部、第一/共同一作、通讯作者、其他署名筛选，分类允许重叠；卡片显示本人在每篇成果中的身份。最近阅读使用同一 Author ID 范围。身份候选仅来自当前用户论文库，最终绑定不使用姓名动态匹配，因此同名但不同 Author ID 不会被误纳入。
+
+ResearchIdentity 仅保存稳定 `author_id`、显示名以及可空的规范化 ORCID/邮箱，不保存或匹配单位。候选列表可以显示 affiliation 帮助人工区分，但更换单位不会改变已有身份关系。`/library` 使用独立 `/api/my-papers` 读模型和轻量 Card 路由；复杂元数据管理继续位于 `/papers` Data Grid。

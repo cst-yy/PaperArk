@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_current_user_id, get_db
-from app.models import AIBudgetPolicy, AIRequestRecord
+from app.models import AIBudgetPolicy, AIModel, AIProvider, AIRequestRecord, Setting
 from app.schemas.ai_infrastructure import *
 from app.services.ai_provider_service import AIProviderService
 from app.services.ai_usage_service import AIUsageService
@@ -47,7 +47,14 @@ async def test_provider(provider_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 @router.get("/models", response_model=list[AIModelResponse])
 async def models(db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
-    return await AIProviderService(db).list_models(user_id)
+    rows = await AIProviderService(db).list_models(user_id)
+    result = []
+    for row in rows:
+        current = next((price for price in sorted(row.prices, key=lambda value: value.effective_from, reverse=True) if price.effective_to is None), None)
+        payload = AIModelResponse.model_validate(row).model_dump()
+        payload["pricing"] = AIModelPricingResponse.model_validate(current).model_dump() if current else None
+        result.append(payload)
+    return result
 
 
 @router.post("/models", response_model=AIModelResponse, status_code=201)
@@ -56,9 +63,32 @@ async def create_model(data: AIModelCreate, db: AsyncSession = Depends(get_db), 
     except LookupError as exc: raise HTTPException(404, detail=str(exc)) from exc
 
 
+@router.get("/default-model")
+async def default_model(db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    value = await db.scalar(select(Setting.value).where(Setting.user_id == user_id, Setting.key == "ai.default_model_id"))
+    return {"model_id": value}
+
+
+@router.put("/default-model")
+async def set_default_model(data: AIDefaultModelUpdate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    exists = await db.scalar(select(AIModel.id).join(AIProvider).where(AIModel.id == data.model_id, AIProvider.user_id == user_id, AIProvider.enabled.is_(True), AIModel.enabled.is_(True)))
+    if not exists: raise HTTPException(404, detail="AI model not found or disabled")
+    row = await db.scalar(select(Setting).where(Setting.user_id == user_id, Setting.key == "ai.default_model_id"))
+    if row: row.value = str(data.model_id)
+    else: db.add(Setting(user_id=user_id, key="ai.default_model_id", value=str(data.model_id)))
+    await db.flush()
+    return {"model_id": str(data.model_id)}
+
+
 @router.post("/models/{model_id}/pricing", response_model=AIModelPricingResponse, status_code=201)
 async def add_pricing(model_id: uuid.UUID, data: AIModelPricingCreate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
     try: return await AIProviderService(db).add_pricing(user_id, model_id, data)
+    except LookupError as exc: raise HTTPException(404, detail=str(exc)) from exc
+
+
+@router.get("/models/{model_id}/pricing", response_model=AIModelPricingResponse | None)
+async def current_pricing(model_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    try: return await AIProviderService(db).current_pricing(user_id, model_id)
     except LookupError as exc: raise HTTPException(404, detail=str(exc)) from exc
 
 

@@ -1,5 +1,6 @@
 export type AnnotationType = "highlight" | "underline" | "comment" | "area";
 export type AnnotationColor = "yellow" | "green" | "blue" | "red" | "purple";
+export type AnnotationLineStyle = "solid" | "dashed" | "dotted" | "double" | "wavy";
 
 export interface NormalizedRect {
   x: number;
@@ -31,6 +32,7 @@ export interface Annotation {
   suffix_text?: string | null;
   position_data?: AnnotationPosition | null;
   color?: AnnotationColor | null;
+  line_style?: AnnotationLineStyle | null;
   comment?: string | null;
   created_at: string;
   updated_at: string;
@@ -46,11 +48,13 @@ export interface CreateAnnotationInput {
   suffix_text?: string;
   position_data?: AnnotationPosition;
   color?: AnnotationColor;
+  line_style?: AnnotationLineStyle;
   comment?: string;
 }
 
 export interface UpdateAnnotationInput {
   color?: AnnotationColor | null;
+  line_style?: AnnotationLineStyle | null;
   comment?: string | null;
 }
 

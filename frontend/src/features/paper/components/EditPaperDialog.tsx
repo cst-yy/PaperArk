@@ -53,7 +53,7 @@ export function EditPaperDialog({ paper, onClose, onDelete }: EditPaperDialogPro
   const [publisher, setPublisher] = useState(paper.publisher ?? "");
   const [year, setYear] = useState(paper.publication_year?.toString() ?? "");
   const [citationCount, setCitationCount] = useState(paper.citation_count?.toString() ?? "");
-  const [authors, setAuthors] = useState<import("../types").AuthorInput[]>(paper.authors.map((author) => ({ name: author.name, orcid: author.orcid ?? "", affiliation: author.affiliation ?? "" })));
+  const [authors, setAuthors] = useState<import("../types").AuthorInput[]>(paper.authors.map((author) => ({ name: author.name, orcid: author.orcid ?? "", affiliation: author.affiliation ?? "", is_co_first: Boolean(author.is_co_first), is_corresponding: Boolean(author.is_corresponding) })));
   const [tagIds, setTagIds] = useState(paper.tags.map((tag) => tag.id));
   const [folderIds, setFolderIds] = useState(paper.folders.map((folder) => folder.id));
   const [keywordInputs, setKeywordInputs] = useState(paper.keywords.filter((keyword) => keyword.sources.includes("manual")).map((keyword) => ({ name: keyword.display_name })));
@@ -67,7 +67,7 @@ export function EditPaperDialog({ paper, onClose, onDelete }: EditPaperDialogPro
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const initial = useMemo(() => JSON.stringify({ title: paper.title, abstract: paper.abstract ?? "", doi: paper.doi ?? "", arxivId: paper.arxiv_id ?? "", url: paper.url ?? "", journal: paper.journal ?? "", conference: paper.conference ?? "", publisher: paper.publisher ?? "", year: paper.publication_year?.toString() ?? "", citationCount: paper.citation_count?.toString() ?? "", authors: paper.authors.map((author) => ({ name: author.name, orcid: author.orcid ?? "", affiliation: author.affiliation ?? "" })), tagIds: paper.tags.map((tag) => tag.id), folderIds: paper.folders.map((folder) => folder.id), keywordInputs: paper.keywords.filter((keyword) => keyword.sources.includes("manual")).map((keyword) => ({ name: keyword.display_name })) }), [paper]);
+  const initial = useMemo(() => JSON.stringify({ title: paper.title, abstract: paper.abstract ?? "", doi: paper.doi ?? "", arxivId: paper.arxiv_id ?? "", url: paper.url ?? "", journal: paper.journal ?? "", conference: paper.conference ?? "", publisher: paper.publisher ?? "", year: paper.publication_year?.toString() ?? "", citationCount: paper.citation_count?.toString() ?? "", authors: paper.authors.map((author) => ({ name: author.name, orcid: author.orcid ?? "", affiliation: author.affiliation ?? "", is_co_first: Boolean(author.is_co_first), is_corresponding: Boolean(author.is_corresponding) })), tagIds: paper.tags.map((tag) => tag.id), folderIds: paper.folders.map((folder) => folder.id), keywordInputs: paper.keywords.filter((keyword) => keyword.sources.includes("manual")).map((keyword) => ({ name: keyword.display_name })) }), [paper]);
   const current = JSON.stringify({ title, abstract, doi, arxivId, url, journal, conference, publisher, year, citationCount, authors, tagIds, folderIds, keywordInputs });
   const dirty = initial !== current;
   const disabled = save.isPending || isDeleting;
@@ -152,7 +152,7 @@ export function EditPaperDialog({ paper, onClose, onDelete }: EditPaperDialogPro
     try {
       await save.mutateAsync({ paperId: paper.id, draft: {
         title: title.trim(), abstract: emptyToNull(abstract), doi: emptyToNull(doi), arxiv_id: emptyToNull(arxivId), url: emptyToNull(url), journal: emptyToNull(journal), conference: emptyToNull(conference), publisher: emptyToNull(publisher), publication_year: parsedYear, citation_count: parsedCitationCount,
-        authors: authors.map((author) => ({ name: author.name.trim(), orcid: emptyToNull(author.orcid ?? ""), affiliation: emptyToNull(author.affiliation ?? "") })), tag_ids: tagIds, folder_ids: folderIds, keywords: keywordInputs,
+        authors: authors.map((author) => ({ name: author.name.trim(), orcid: emptyToNull(author.orcid ?? ""), affiliation: emptyToNull(author.affiliation ?? ""), is_co_first: Boolean(author.is_co_first), is_corresponding: Boolean(author.is_corresponding) })), tag_ids: tagIds, folder_ids: folderIds, keywords: keywordInputs,
       } });
       onClose();
     } catch (failure) {

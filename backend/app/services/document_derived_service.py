@@ -38,7 +38,12 @@ class DocumentDerivedService:
             # Explicit child-first replacement preserves the whole old snapshot on
             # any later flush failure, under the caller's savepoint.
             await self.db.execute(delete(DocumentElement).where(DocumentElement.document_id == document.id))
-            await self.db.execute(delete(PageBlock).where(PageBlock.document_id == document.id))
+            # Parser-owned defaults are replaceable derived data. User-created
+            # named regions are durable Reader data and must survive a reparse.
+            await self.db.execute(delete(PageBlock).where(
+                PageBlock.document_id == document.id,
+                PageBlock.block_type != "custom",
+            ))
             await self.db.execute(delete(Reference).where(Reference.document_id == document.id))
             await self.db.execute(delete(Chunk).where(Chunk.document_id == document.id))
             await self.db.execute(delete(Section).where(Section.document_id == document.id))
@@ -112,6 +117,7 @@ class DocumentDerivedService:
                     section_id=section_id,
                     page_number=block.page_number, block_order=block.block_order,
                     reading_order=block.reading_order, block_type=block.block_type,
+                    name=block.name, is_default=block.is_default,
                     column_index=block.column_index, bounding_box=block.bounding_box,
                     source_text=block.source_text, normalized_text=block.normalized_text,
                     source_hash=block.source_hash, parser_version="page-block-v1",
@@ -188,8 +194,10 @@ class DocumentDerivedService:
                 raise DocumentParseError("reference year is invalid")
         if len({(b.page_number, b.block_order) for b in page_blocks}) != len(page_blocks):
             raise DocumentParseError("page block order contains duplicates")
-        if any(not b.normalized_text or b.page_number < 1 or b.page_number > document.page_count for b in page_blocks):
+        if any(b.page_number < 1 or b.page_number > document.page_count for b in page_blocks):
             raise DocumentParseError("page block content or page is invalid")
+        if page_blocks and (len(page_blocks) != document.page_count or any(not b.is_default for b in page_blocks)):
+            raise DocumentParseError("parsed snapshot must contain exactly one default page block per page")
 
 
 async def replace_document_derivatives(

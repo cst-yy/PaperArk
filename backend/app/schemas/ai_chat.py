@@ -14,7 +14,8 @@ class ChatSessionCreate(BaseModel):
 
 
 class ChatSessionUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
+    title: str | None = Field(None, min_length=1, max_length=255)
+    model_id: UUID | None = None
 
 
 class ChatSessionResponse(BaseModel):

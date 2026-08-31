@@ -52,7 +52,9 @@ export async function applyAIAnalysis(analysisId: string, request: AIAnalysisApp
   return (await api.post(`/ai/analyses/${analysisId}/apply`, request)).data;
 }
 export async function listChatSessions(paperId:string){return (await api.get<AIChatSession[]>(`/papers/${paperId}/chat-sessions`)).data;}
-export async function createChatSession(paperId:string,scopeType:"page"|"paper"="paper"){return (await api.post<AIChatSession>(`/papers/${paperId}/chat-sessions`,{title:"新对话",scope_type:scopeType})).data;}
+export async function createChatSession(paperId:string,scopeType:"page"|"paper"="paper",modelId?:string){return (await api.post<AIChatSession>(`/papers/${paperId}/chat-sessions`,{title:"新对话",scope_type:scopeType,model_id:modelId})).data;}
 export async function listChatMessages(sessionId:string){return (await api.get<AIChatMessage[]>(`/chat-sessions/${sessionId}/messages`)).data;}
 export async function sendChatMessage(sessionId:string,content:string,scopeType:"page"|"paper",pageNumber:number){return (await api.post<AIChatTurn>(`/chat-sessions/${sessionId}/messages`,{content,scope_type:scopeType,page_number:scopeType==="page"?pageNumber:undefined})).data;}
+export async function updateChatSession(sessionId:string,data:{model_id?:string;title?:string}){return (await api.patch<AIChatSession>(`/chat-sessions/${sessionId}`,data)).data;}
+export async function deleteChatSession(sessionId:string){await api.delete(`/chat-sessions/${sessionId}`);}
 export async function saveChatMessageAsNote(messageId:string){return (await api.post(`/chat-messages/${messageId}/save-as-note`)).data;}

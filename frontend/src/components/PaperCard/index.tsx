@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Pencil, Star, FileText, FileType } from "lucide-react";
 import clsx from "clsx";
+import type { ReactNode } from "react";
 import type { PaperListItem } from "@/features/paper/types";
 import { getStableColor } from "@/utils";
 
@@ -60,6 +61,7 @@ export function PaperCard({ paper, onToggleStar, onEdit }: PaperCardProps) {
         >
           {paper.title}
         </Link>
+        {paper.title_zh && <p className="mt-1 line-clamp-1 text-xs text-gray-500 dark:text-gray-400">{paper.title_zh}</p>}
 
         <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
           {source && <span>{source}</span>}
@@ -89,6 +91,13 @@ export function PaperCard({ paper, onToggleStar, onEdit }: PaperCardProps) {
           </span>
         </div>
 
+        {paper.my_author_roles && <div className="mt-2 flex flex-wrap gap-1">
+          {paper.my_author_roles.is_first_author && <RoleBadge>第一作者</RoleBadge>}
+          {paper.my_author_roles.is_co_first && <RoleBadge>共同一作</RoleBadge>}
+          {paper.my_author_roles.is_corresponding && <RoleBadge>通讯作者</RoleBadge>}
+          {!paper.my_author_roles.is_first_author && !paper.my_author_roles.is_co_first && !paper.my_author_roles.is_corresponding && <RoleBadge>第 {paper.my_author_roles.author_order + 1} 作者</RoleBadge>}
+        </div>}
+
         {paper.tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {paper.tags.map((tag) => (
@@ -104,9 +113,12 @@ export function PaperCard({ paper, onToggleStar, onEdit }: PaperCardProps) {
             ))}
           </div>
         )}
+        {paper.keywords?.length ? <div className="mt-1 flex flex-wrap gap-1">{paper.keywords.slice(0,4).map(keyword=><span key={keyword.id} className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">{keyword.display_name}</span>)}</div>:null}
       </div>
 
       <div className="flex shrink-0 items-center gap-1"><button type="button" onClick={() => onEdit?.(paper.id)} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-slate-800" aria-label="编辑论文信息" title="编辑信息"><Pencil className="h-4 w-4" /></button><button type="button" onClick={() => onToggleStar?.(paper.id)} className="p-1" aria-label="收藏论文"><Star className={clsx("h-4 w-4", paper.is_starred ? "fill-amber-400 text-amber-400" : "text-gray-300")} /></button></div>
     </div>
   );
 }
+
+function RoleBadge({children}:{children:ReactNode}) { return <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">{children}</span>; }

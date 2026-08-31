@@ -17,7 +17,7 @@ async def create_user(session, suffix: str) -> uuid.UUID:
 async def test_library_metadata_search_matches_each_supported_field_once(session):
     user_id = await create_user(session, "search")
     paper = Paper(
-        id=uuid.uuid4(), user_id=user_id, title="Representation Study",
+        id=uuid.uuid4(), user_id=user_id, title="Representation Study", title_zh="表征学习研究",
         abstract="Study of robust optimization", doi="10.1000/metadata",
         arxiv_id="2401.01234", journal="Neurocomputing", conference="NeurIPS",
         publisher="Academic Press", publication_year=2025, status="ready", is_starred=True,
@@ -44,7 +44,7 @@ async def test_library_metadata_search_matches_each_supported_field_once(session
     await session.flush()
     repo = PaperRepository(session)
 
-    for query in ["Representation", "robust", "Ada", "Important", "Federated", "10.1000", "2401.01234", "Neuro", "NeurIPS", "Academic"]:
+    for query in ["Representation", "表征学习", "robust", "Ada", "Important", "Federated", "10.1000", "2401.01234", "Neuro", "NeurIPS", "Academic"]:
         result = await repo.list_papers(user_id=user_id, q=query)
         assert [item.id for item in result.items] == [paper.id]
         assert result.total == 1
@@ -97,3 +97,55 @@ async def test_library_metadata_search_is_user_scoped_and_pagination_counts_pape
     assert [item.id for item in shared.items] == [owner_paper.id]
     assert (await repo.list_papers(user_id=user_id, q="Foreign Only")).total == 0
     assert (await repo.list_papers(user_id=user_id, q="   ")).total == 1
+
+
+@pytest.mark.asyncio
+async def test_advanced_metadata_filters_compose_at_paper_level(session):
+    user_id = await create_user(session, "advanced")
+    target = Paper(
+        user_id=user_id,
+        title="Graph Retrieval for Science",
+        title_zh="科学图检索",
+        abstract="Evidence-grounded retrieval",
+        journal="Journal of Research Systems",
+        publisher="Example Press",
+        doi="10.1000/graph",
+        publication_year=2024,
+    )
+    decoy = Paper(
+        user_id=user_id,
+        title="Graph Retrieval Survey",
+        abstract="Unrelated overview",
+        journal="Other Venue",
+        publication_year=2024,
+    )
+    author = Author(name="Ada Researcher")
+    tag = Tag(user_id=user_id, name="Core Reading", normalized_name="core reading")
+    keyword = Keyword(user_id=user_id, display_name="Hybrid Search", normalized_name="hybrid search")
+    session.add_all([target, decoy, author, tag, keyword])
+    await session.flush()
+    session.add_all([
+        PaperAuthor(paper_id=target.id, author_id=author.id, author_order=0),
+        PaperTag(paper_id=target.id, tag_id=tag.id),
+        PaperKeyword(paper_id=target.id, keyword_id=keyword.id, source="manual"),
+    ])
+    await session.flush()
+
+    result = await PaperRepository(session).list_papers(
+        user_id=user_id,
+        title_query="graph retrieval",
+        author_query="Ada",
+        abstract_query="evidence",
+        venue_query="Research Systems",
+        keyword_query="Hybrid",
+        tag_query="Core",
+        identifier_query="10.1000",
+        year=2024,
+    )
+    assert result.total == 1
+    assert [paper.id for paper in result.items] == [target.id]
+    assert (await PaperRepository(session).list_papers(
+        user_id=user_id,
+        title_query="graph retrieval",
+        author_query="missing author",
+    )).total == 0

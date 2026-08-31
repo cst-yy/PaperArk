@@ -63,6 +63,10 @@ class AnnotationService:
         for key, value in kwargs.items():
             setattr(annotation, key, value)
         await self.db.flush()
+        # ``updated_at`` is populated by an SQL expression during UPDATE.
+        # Refresh it inside the async session before FastAPI/Pydantic reads the
+        # response, otherwise attribute access can trigger implicit async IO.
+        await self.db.refresh(annotation)
         return annotation
 
     async def delete(self, user_id: uuid.UUID, annotation_id: uuid.UUID) -> None:

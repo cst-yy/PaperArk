@@ -8,7 +8,7 @@ Endpoints:
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,8 +30,38 @@ from app.services.document_parse_service import (
 from app.services.document_service import DocumentService, get_document_service
 from app.services.document_element_service import DocumentElementService, get_document_element_service
 from app.services.reference_service import ReferenceService, get_reference_service
+from app.services.page_block_service import PageBlockService
+from app.schemas.translation import CustomPageBlockCreate, CustomPageBlockUpdate, PageBlockResponse
 
 router = APIRouter()
+
+
+@router.get("/{document_id}/page-blocks", response_model=list[PageBlockResponse])
+async def list_page_blocks(document_id: uuid.UUID, page_number: int | None = Query(None, ge=1), q: str | None = Query(None, max_length=255), db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    try: return await PageBlockService(db).list(user_id, document_id, page_number, q)
+    except LookupError as exc: raise HTTPException(404, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/page-blocks", response_model=PageBlockResponse, status_code=201)
+async def create_page_block(document_id: uuid.UUID, data: CustomPageBlockCreate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    try: return await PageBlockService(db).create(user_id, document_id, data)
+    except LookupError as exc: raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc: raise HTTPException(422, detail=str(exc)) from exc
+
+
+@router.patch("/page-blocks/{block_id}", response_model=PageBlockResponse)
+async def update_page_block(block_id: uuid.UUID, data: CustomPageBlockUpdate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    try: return await PageBlockService(db).update(user_id, block_id, data)
+    except LookupError as exc: raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc: raise HTTPException(422, detail=str(exc)) from exc
+
+
+@router.delete("/page-blocks/{block_id}", status_code=204)
+async def delete_page_block(block_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    try: await PageBlockService(db).delete(user_id, block_id)
+    except LookupError as exc: raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc: raise HTTPException(422, detail=str(exc)) from exc
+    return Response(status_code=204)
 
 # ── Exception -> HTTP status code mapping ──
 

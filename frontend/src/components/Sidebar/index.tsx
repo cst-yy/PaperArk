@@ -17,7 +17,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   TableProperties,
-  CircleDollarSign,
 } from "lucide-react";
 import clsx from "clsx";
 import { useFolders, useCreateFolder, useDeleteFolder, useUpdateFolder } from "@/features/folder/hooks";
@@ -317,7 +316,6 @@ export function Sidebar() {
           <SettingsIcon className="h-4 w-4" />
           设置
         </NavLink>
-        <NavLink to="/settings/ai-usage" className={({isActive})=>clsx("sidebar-nav-item",isActive&&"sidebar-nav-item-active")}><CircleDollarSign className="h-4 w-4"/><span>AI 用量与费用</span></NavLink>
         <p className="mt-1 px-3 text-xs text-gray-400">v0.1.0 · S2</p>
       </div>
     </aside>

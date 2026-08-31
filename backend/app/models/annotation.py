@@ -48,6 +48,7 @@ class Annotation(Base):
     suffix_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     position_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    line_style: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

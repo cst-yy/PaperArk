@@ -38,7 +38,7 @@ export interface CitationEdgeDetail {
 export type KnowledgeRelationType = "extends" | "improves" | "contrasts" | "supports" | "uses" | "similar";
 export type GraphRelationType = "cites" | KnowledgeRelationType;
 export type RelationOrigin = "reference" | "manual" | "ai";
-export type Point = { x: number; y: number };
+export type Point = { x: number; y: number; width?: number; height?: number; background?: string; text_color?: string; font_size?: number };
 
 export interface KnowledgeGraphEdge {
   relation_id: string;
@@ -78,6 +78,6 @@ export interface RelationSuggestion {
 
 export interface GraphLayout { id: string; graph_type: "citation" | "knowledge" | "mind_map"; scope_key: string; positions: Record<string, Point>; updated_at: string }
 
-export interface MindMapNode { id: string; node_type: "paper" | "profile_field" | "contribution" | "experiment"; title: string; summary: string; paper_id: string; note_id?: string | null; entity_id?: string | null; evidence_ids: string[] }
-export interface MindMapEdge { source: string; target: string; relation: "contains" | "supports" }
+export interface MindMapNode { id: string; node_type: "paper" | "profile_field" | "contribution" | "experiment" | "manual"; title: string; summary: string; paper_id: string; note_id?: string | null; entity_id?: string | null; evidence_ids: string[] }
+export interface MindMapEdge { id?: string | null; source: string; target: string; relation: string; manual?: boolean }
 export interface MindMap { paper_id: string; note_id?: string | null; profile_revision?: number | null; nodes: MindMapNode[]; edges: MindMapEdge[]; has_profile: boolean }

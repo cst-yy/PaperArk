@@ -15,6 +15,7 @@ import clsx from "clsx";
 import type { PaperCreateInput, PaperListItem } from "@/features/paper/types";
 import type { Folder } from "@/features/folder/types";
 import { getStableColor } from "@/utils";
+import { useIdentityCandidates, useMyPaperStats, useResearchIdentity, useSetResearchIdentity } from "@/features/research-identity/hooks";
 
 export default function Library() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -28,6 +29,10 @@ export default function Library() {
 
   const { data: tags } = useTags();
   const { data: folders } = useFolders();
+  const identity = useResearchIdentity();
+  const identityCandidates = useIdentityCandidates();
+  const myStats = useMyPaperStats();
+  const setIdentity = useSetResearchIdentity();
   const editingPaper = usePaper(editingPaperId ?? undefined);
 
   const { data: paperPage, isLoading } = usePapers(toPaperListParams(query));
@@ -35,7 +40,7 @@ export default function Library() {
   const unstarMut = useUnstarPaper();
   const createPaperMut = useCreatePaper();
   const deletePaperMut = useDeletePaper();
-  const { data: recentReading = [], isLoading: recentReadingLoading } = useRecentReading(recentReadingExpanded ? 10 : 2);
+  const { data: recentReading = [], isLoading: recentReadingLoading } = useRecentReading(recentReadingExpanded ? 10 : 2, true);
 
   const papers = paperPage?.items ?? [];
 
@@ -47,7 +52,7 @@ export default function Library() {
     }
   };
 
-  const hasActiveFilters = Boolean(query.q || query.folder_id || query.tag_id || query.year || query.starred || query.status || query.reading_status || query.page_size !== 20);
+  const hasActiveFilters = Boolean(query.q || query.folder_id || query.tag_id || query.year || query.starred || query.status || query.reading_status || query.author_role || query.page_size !== 20);
   const updateFilter = (patch: Partial<typeof query>) => setSearchParams(updateLibraryQuery(searchParams, patch));
   const clearFilter = () => setSearchParams(clearLibraryFilters());
 
@@ -57,8 +62,8 @@ export default function Library() {
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold">我的论文</h1>
-          {paperPage && paperPage.total > 0 && (
-            <span className="text-sm text-gray-400">{paperPage.total} 篇</span>
+          {identity.data && myStats.data && (
+            <span className="text-sm text-gray-400">{myStats.data.total} 篇 · 一作/共一 {myStats.data.first_or_co_first} · 通讯 {myStats.data.corresponding}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -78,6 +83,9 @@ export default function Library() {
           </button>
         </div>
       </div>
+
+      {!identity.isLoading && !identity.data && <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"><span>请先绑定“我的作者身份”，系统将按 Author ID 判断本人署名，避免同名误判。</span><select aria-label="我的作者身份" className="input h-9 min-w-56 bg-white text-sm" defaultValue="" onChange={(event)=>{if(event.target.value)setIdentity.mutate(event.target.value)}}><option value="" disabled>选择作者…</option>{identityCandidates.data?.map(candidate=><option key={candidate.author_id} value={candidate.author_id}>{candidate.name}{candidate.affiliation?` · ${candidate.affiliation}`:""}（{candidate.paper_count} 篇）</option>)}</select></div>}
+      {identity.data && <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">当前研究身份：<strong className="text-gray-700 dark:text-gray-200">{identity.data.author_name}</strong><select aria-label="切换我的作者身份" className="input h-8 w-auto text-xs" value={identity.data.author_id} onChange={(event)=>setIdentity.mutate(event.target.value)}>{identityCandidates.data?.map(candidate=><option key={candidate.author_id} value={candidate.author_id}>{candidate.name}{candidate.affiliation?` · ${candidate.affiliation}`:""}</option>)}</select></div>}
 
       <RecentReadingList
         items={recentReading}
@@ -128,6 +136,7 @@ export default function Library() {
       </div>
 
       {/* Papers */}
+      <div className="mb-4 flex gap-2" aria-label="我的作者身份筛选">{([ [undefined,"全部"], ["first","第一/共同一作"], ["corresponding","通讯作者"], ["other","其他署名"] ] as const).map(([role,label])=><button key={role??"all"} type="button" className={clsx("rounded-full px-3 py-1.5 text-xs",query.author_role===role?"bg-primary-500 text-white":"bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-300")} onClick={()=>updateFilter({author_role:role})}>{label}</button>)}</div>
       {isLoading ? (
         <div className="flex justify-center py-20">
           <p className="text-sm text-gray-400">加载中...</p>

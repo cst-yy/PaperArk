@@ -1,11 +1,12 @@
 /* eslint-disable react-refresh/only-export-components -- column metadata belongs to the grid */
-import { Check, LoaderCircle, Pencil } from "lucide-react";
+import { Check, Filter, LoaderCircle, Pencil, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FONT_MAP, FONT_SIZE, ROW_HEIGHT, type PaperListAppearance } from "./appearance";
 import { calculateColumnLayout, COLUMN_LAYOUT, resetColumnWidth, resizeColumn, type WidthPreferences } from "./columnLayout";
 import { useUpdatePaperCell } from "./hooks";
-import type { PaperCellUpdate, PaperListColumn, PaperListRow } from "./types";
+import type { PaperCellUpdate, PaperListColumn, PaperListQuery, PaperListRow } from "./types";
+import { Popover } from "@/components/overlay";
 
 export const COLUMN_LABELS: Record<PaperListColumn, string> = {
   title:"标题",title_zh:"中文标题",abstract:"摘要",authors:"作者",journal:"期刊",conference:"会议",publication_year:"年份",
@@ -16,7 +17,27 @@ const readingLabels:Record<string,string>={unread:"未读",reading:"阅读中",f
 const editable = new Set<PaperListColumn>(["title","title_zh","abstract","journal","conference","publication_year","doi","arxiv_id","url","publisher","citation_text","citation_count","starred"]);
 const longText = new Set<PaperListColumn>(["abstract","citation_text"]);
 
-export function PaperDataGrid({rows,columns,appearance,widthPreferences,onWidthPreferencesChange,selected,onSelectionChange,onComplexEdit,initialScrollTop=0,onScrollPosition}:{rows:PaperListRow[];columns:PaperListColumn[];appearance:PaperListAppearance;widthPreferences:WidthPreferences;onWidthPreferencesChange:(value:WidthPreferences)=>void;selected:Set<string>;onSelectionChange:(value:Set<string>)=>void;onComplexEdit:(id:string)=>void;initialScrollTop?:number;onScrollPosition?:(value:number)=>void}) {
+function FilterHeaderCell({column,width,query,tags,onFilter,onDrag,onCommit,onReset}:{column:PaperListColumn;width:number;query:PaperListQuery;tags:{id:string;name:string}[];onFilter:(patch:Partial<PaperListQuery>)=>void;onDrag:(delta:number)=>void;onCommit:(delta:number)=>void;onReset:()=>void}) {
+  return <span className="relative block h-full min-w-0 pr-6"><HeaderCell column={column} width={width} onDrag={onDrag} onCommit={onCommit} onReset={onReset}/><span className="absolute right-2 top-1/2 -translate-y-1/2"><ColumnFilter column={column} query={query} tags={tags} onFilter={onFilter}/></span></span>;
+}
+
+function ColumnFilter({column,query,tags,onFilter}:{column:PaperListColumn;query:PaperListQuery;tags:{id:string;name:string}[];onFilter:(patch:Partial<PaperListQuery>)=>void}) {
+  const [open,setOpen]=useState(false);
+  const dedicated=column==="authors"?"author":column==="journal"?"journal":column==="keywords"?"keyword":null;
+  const current=dedicated?String(query[dedicated]??""):column==="publication_year"?String(query.year_from===query.year_to?query.year_from??"":""):column==="tags"?query.tag_id??"":column==="reading_status"?query.reading_status??"":column==="starred"?(query.starred?"true":""):query.q??"";
+  const [draft,setDraft]=useState(current);
+  const active=Boolean(current);
+  const apply=()=>{if(dedicated)onFilter({[dedicated]:draft.trim()||undefined});else if(column==="publication_year"){const year=Number(draft);onFilter({year_from:year||undefined,year_to:year||undefined});}else if(column==="tags")onFilter({tag_id:draft||undefined});else if(column==="reading_status")onFilter({reading_status:draft||undefined});else if(column==="starred")onFilter({starred:draft==="true"||undefined});else onFilter({q:draft.trim()||undefined});setOpen(false);};
+  const clear=()=>{setDraft("");if(dedicated)onFilter({[dedicated]:undefined});else if(column==="publication_year")onFilter({year_from:undefined,year_to:undefined});else if(column==="tags")onFilter({tag_id:undefined});else if(column==="reading_status")onFilter({reading_status:undefined});else if(column==="starred")onFilter({starred:undefined});else onFilter({q:undefined});setOpen(false);};
+  const isSelect=["tags","reading_status","starred"].includes(column);
+  return <Popover open={open} onOpenChange={value=>{setOpen(value);if(value)setDraft(current);}} trigger={props=><button {...props} type="button" aria-label={`筛选${COLUMN_LABELS[column]}`} className={`shrink-0 rounded p-0.5 ${active?"bg-primary-100 text-primary-600":"text-gray-400 hover:bg-gray-200"}`}><Filter className="h-3 w-3"/></button>} role="dialog" contentClassName="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-gray-200 bg-white p-3 text-gray-700 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-gray-200">
+    <p className="mb-2 text-xs font-semibold">筛选：{COLUMN_LABELS[column]}</p>
+    {column==="tags"?<select autoFocus className="input h-8 w-full text-xs" value={draft} onChange={e=>setDraft(e.target.value)}><option value="">全部标签</option>{tags.map(tag=><option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>:column==="reading_status"?<select autoFocus className="input h-8 w-full text-xs" value={draft} onChange={e=>setDraft(e.target.value)}><option value="">全部状态</option><option value="unread">未读</option><option value="reading">阅读中</option><option value="finished">已读</option><option value="archived">已归档</option></select>:column==="starred"?<select autoFocus className="input h-8 w-full text-xs" value={draft} onChange={e=>setDraft(e.target.value)}><option value="">全部</option><option value="true">仅收藏</option></select>:<><input autoFocus type={column==="publication_year"?"number":"search"} className="input h-8 w-full text-xs" value={draft} placeholder={dedicated?`搜索${COLUMN_LABELS[column]}`:"在全部字段中搜索"} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&apply()}/>{!dedicated&&column!=="publication_year"&&<p className="mt-1 text-[10px] font-normal text-gray-400">该列复用全字段服务端搜索</p>}</>}
+    <div className="mt-3 flex justify-end gap-1"><button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={clear}><X className="h-3 w-3"/>清除</button><button type="button" className="btn-primary px-2 py-1 text-xs" onClick={apply}>{isSelect?"应用":"搜索"}</button></div>
+  </Popover>;
+}
+
+export function PaperDataGrid({rows,columns,appearance,query,tags,onQueryChange,widthPreferences,onWidthPreferencesChange,selected,onSelectionChange,onComplexEdit,initialScrollTop=0,onScrollPosition}:{rows:PaperListRow[];columns:PaperListColumn[];appearance:PaperListAppearance;query:PaperListQuery;tags:{id:string;name:string}[];onQueryChange:(patch:Partial<PaperListQuery>)=>void;widthPreferences:WidthPreferences;onWidthPreferencesChange:(value:WidthPreferences)=>void;selected:Set<string>;onSelectionChange:(value:Set<string>)=>void;onComplexEdit:(id:string)=>void;initialScrollTop?:number;onScrollPosition?:(value:number)=>void}) {
   const ref=useRef<HTMLDivElement>(null);const scroller=useRef<HTMLDivElement>(null);const scrollSaveTimer=useRef<ReturnType<typeof setTimeout>>();const [width,setWidth]=useState(1000);const [scrollTop,setScrollTop]=useState(initialScrollTop);const [heights,setHeights]=useState(()=>new Map<string,number>());const [drag,setDrag]=useState<{column:PaperListColumn;delta:number}|null>(null);
   const minimumHeight=ROW_HEIGHT[appearance.density];const viewportHeight=520;const overscan=5;
   useEffect(()=>{const node=ref.current;if(!node)return;let frame=0;const observer=new ResizeObserver(()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>setWidth(node.clientWidth));});observer.observe(node);return()=>{cancelAnimationFrame(frame);observer.disconnect();};},[]);
@@ -30,9 +51,9 @@ export function PaperDataGrid({rows,columns,appearance,widthPreferences,onWidthP
   const allSelected=rows.length>0&&rows.every(row=>selected.has(row.id));
   const togglePage=()=>{const next=new Set(selected);if(allSelected)rows.forEach(row=>next.delete(row.id));else rows.forEach(row=>next.add(row.id));onSelectionChange(next);};
   const style={fontFamily:FONT_MAP[appearance.font_family],fontSize:FONT_SIZE[appearance.font_size],color:appearance.primary_text,borderColor:appearance.border};
-  return <div ref={ref} data-paper-grid className="min-h-0 w-full flex-1 overflow-x-hidden rounded-xl border bg-white" style={style}>
-    <div className="grid items-center border-b px-1 font-semibold" style={{gridTemplateColumns:template,height:38,background:appearance.header_background,color:appearance.header_text,borderColor:appearance.border}}>
-      <input type="checkbox" aria-label="选择当前页全部论文" checked={allSelected} onChange={togglePage}/>{columns.map(column=><HeaderCell key={column} column={column} width={renderedWidths[column]} onDrag={delta=>setDrag({column,delta})} onCommit={delta=>{onWidthPreferencesChange(resizeColumn(columns,baseWidths,widthPreferences,column,delta));setDrag(null);}} onReset={()=>onWidthPreferencesChange(resetColumnWidth(widthPreferences,column))}/>)}
+  return <div ref={ref} data-paper-grid className="min-h-0 w-full flex-1 rounded-xl border bg-white" style={style}>
+    <div className="relative z-20 grid items-center border-b px-1 font-semibold" style={{gridTemplateColumns:template,height:38,background:appearance.header_background,color:appearance.header_text,borderColor:appearance.border}}>
+      <input type="checkbox" aria-label="选择当前页全部论文" checked={allSelected} onChange={togglePage}/>{columns.map(column=><FilterHeaderCell key={column} column={column} width={renderedWidths[column]} query={query} tags={tags} onFilter={onQueryChange} onDrag={delta=>setDrag({column,delta})} onCommit={delta=>{onWidthPreferencesChange(resizeColumn(columns,baseWidths,widthPreferences,column,delta));setDrag(null);}} onReset={()=>onWidthPreferencesChange(resetColumnWidth(widthPreferences,column))}/>)}
     </div>
     <div ref={scroller} className="overflow-y-auto overflow-x-hidden" style={{height:viewportHeight}} onScroll={event=>{const value=event.currentTarget.scrollTop;setScrollTop(value);if(scrollSaveTimer.current)clearTimeout(scrollSaveTimer.current);scrollSaveTimer.current=setTimeout(()=>onScrollPosition?.(value),700);}}>
       <div className="relative" style={{height:totalHeight}}>{visible.map((row,relativeIndex)=>{const index=start+relativeIndex,key=rowKeys[index];return <MeasuredRow key={key} row={row} rowKey={key} top={offsets[index]} height={rowHeights[index]} minimumHeight={minimumHeight} columns={columns} template={template} appearance={appearance} selected={selected.has(row.id)} onMeasured={value=>{const previous=heights.get(key)??minimumHeight;if(Math.abs(previous-value)<=1)return;if(index<first&&scroller.current)scroller.current.scrollTop+=value-previous;const next=new Map(heights);next.set(key,value);setHeights(next);}} onToggle={()=>{const next=new Set(selected);if(next.has(row.id))next.delete(row.id);else next.add(row.id);onSelectionChange(next);}} onComplexEdit={onComplexEdit}/>;})}

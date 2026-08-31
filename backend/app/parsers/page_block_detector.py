@@ -16,6 +16,8 @@ class DetectedPageBlock:
     block_order: int
     reading_order: int
     block_type: str
+    name: str
+    is_default: bool
     column_index: int | None
     bounding_box: dict[str, float]
     source_text: str
@@ -29,25 +31,17 @@ class PageBlockDetector:
 
     def detect(self, parsed: ParsedDocument) -> list[DetectedPageBlock]:
         result: list[DetectedPageBlock] = []
-        reading = 0
         for page in parsed.pages:
-            ordered = self._merge(page.blocks, page.width)
-            for order, block in enumerate(ordered):
-                normalized = " ".join(block.text.split())
-                if not normalized:
-                    continue
-                block_type = self._type(block, normalized, page.height)
-                source_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-                result.append(DetectedPageBlock(
-                    id=uuid.uuid4(), page_number=page.page_number,
-                    block_order=order, reading_order=reading, block_type=block_type,
-                    column_index=self._column(block, page.width),
-                    bounding_box={"x": block.x0 / page.width, "y": block.y0 / page.height,
-                                  "width": (block.x1 - block.x0) / page.width,
-                                  "height": (block.y1 - block.y0) / page.height},
-                    source_text=block.text, normalized_text=normalized, source_hash=source_hash,
-                ))
-                reading += 1
+            source_text = page.text.strip()
+            normalized = " ".join(source_text.split())
+            source_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            result.append(DetectedPageBlock(
+                id=uuid.uuid4(), page_number=page.page_number,
+                block_order=0, reading_order=page.page_number - 1, block_type="page",
+                name="整页", is_default=True, column_index=None,
+                bounding_box={"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0},
+                source_text=source_text, normalized_text=normalized, source_hash=source_hash,
+            ))
         return result
 
     def _merge(self, blocks: list[ParsedTextBlock], width: float) -> list[ParsedTextBlock]:

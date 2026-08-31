@@ -7,8 +7,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models import (AIChatMessage, AIChatSession, AIMessageCitation, Chunk,
-                        Document, PageBlock, Paper, Section)
-from app.schemas.ai_chat import ChatMessageCreate, ChatSessionCreate
+                        AIModel, AIProvider, Document, PageBlock, Paper, Section)
+from app.schemas.ai_chat import ChatMessageCreate, ChatSessionCreate, ChatSessionUpdate
 from app.schemas.note import NoteCreate
 from app.schemas.rag import RAGContextRequest, RAGSource
 from app.services.ai_gateway import AIGateway
@@ -37,6 +37,26 @@ class AIChatService:
         if not row: raise LookupError("Chat session not found")
         return row
 
+    async def update_session(self, user_id, session_id, data: ChatSessionUpdate):
+        row = await self.session(user_id, session_id)
+        if data.title is not None:
+            row.title = data.title
+        if data.model_id is not None:
+            model = await self.db.scalar(select(AIModel).join(AIProvider).where(
+                AIModel.id == data.model_id,
+                AIProvider.user_id == user_id,
+                AIProvider.enabled.is_(True),
+                AIModel.enabled.is_(True),
+            ))
+            if not model:
+                raise LookupError("AI model not found or disabled")
+            row.model_id = data.model_id
+        await self.db.flush()
+        # ``updated_at`` is server-generated and can be expired by flush;
+        # refresh before FastAPI serializes the response in async mode.
+        await self.db.refresh(row)
+        return row
+
     async def messages(self,user_id,session_id):
         await self.session(user_id,session_id)
         return list((await self.db.scalars(select(AIChatMessage).where(AIChatMessage.session_id==session_id)
@@ -54,7 +74,7 @@ class AIChatService:
         if not sources:
             assistant=AIChatMessage(session_id=session.id,role="assistant",content="当前范围内没有足够的论文原文证据来回答这个问题。",status="completed",input_scope_snapshot=snapshot)
             self.db.add(assistant); session.last_message_at=datetime.now(timezone.utc); await self.db.flush()
-            return user,assistant
+            return await self._message(user.id), await self._message(assistant.id)
         messages=GroundedPromptBuilder().build(data.content,sources)
         result,record=await AIGateway(self.db).generate(user_id=user_id,feature="reader_qa",operation="answer_question",
             messages=messages,max_tokens=settings.AI_MAX_OUTPUT_TOKENS,temperature=settings.AI_TEMPERATURE,
@@ -72,7 +92,7 @@ class AIChatService:
                 chunk_id=chunk_id,page_block_id=block.id if block else None,page_number=source.page_start,
                 quote_text=source.content[:1000],bounding_box=block.bounding_box if block else None,citation_order=order))
         session.last_message_at=datetime.now(timezone.utc); await self.db.flush()
-        return user,await self._message(assistant.id)
+        return await self._message(user.id), await self._message(assistant.id)
 
     async def save_as_note(self,user_id,message_id):
         message=await self.db.scalar(select(AIChatMessage).join(AIChatSession).where(AIChatMessage.id==message_id,

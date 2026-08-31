@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { decideSuggestion, generateSuggestions, getCitationEdge, getCitationGraph, getGraphLayout, getKnowledgeGraph, getMindMap, getRelation, listSuggestions, saveGraphLayout } from "./api";
+import { createMindMapEdge, createMindMapNode, decideSuggestion, deleteMindMapEdge, deleteMindMapNode, generateSuggestions, getCitationEdge, getCitationGraph, getGraphLayout, getKnowledgeGraph, getMindMap, getRelation, listSuggestions, saveGraphLayout, updateMindMapEdge, updateMindMapNode } from "./api";
 import type { GraphLayout, Point } from "./types";
 
 export function useCitationGraph(paperId: string | undefined, depth: 1 | 2) {
@@ -20,3 +20,10 @@ export function useSuggestions(paperId?: string) { return useQuery({ queryKey: [
 export function useGenerateSuggestions(paperId?: string) { const client = useQueryClient(); return useMutation({ mutationFn: () => generateSuggestions(paperId!), onSuccess: () => client.invalidateQueries({ queryKey: ["relation-suggestions", paperId] }) }); }
 export function useDecideSuggestion(paperId?: string) { const client = useQueryClient(); return useMutation({ mutationFn: ({ id, decision }: { id: string; decision: "accept" | "reject" }) => decideSuggestion(id, decision), onSuccess: () => { client.invalidateQueries({ queryKey: ["relation-suggestions", paperId] }); client.invalidateQueries({ queryKey: ["knowledge-graph"] }); } }); }
 export function useMindMap(paperId?: string) { return useQuery({ queryKey: ["mind-map", paperId], queryFn: () => getMindMap(paperId!), enabled: Boolean(paperId), gcTime: 60_000 }); }
+function useMindMapMutation<T>(paperId:string,mutationFn:(input:T)=>Promise<import("./types").MindMap>){const client=useQueryClient();return useMutation({mutationFn,onSuccess:(data)=>client.setQueryData(["mind-map",paperId],data)});}
+export function useCreateMindMapNode(paperId:string){return useMindMapMutation(paperId,(input:{title:string;summary:string})=>createMindMapNode(paperId,input));}
+export function useUpdateMindMapNode(paperId:string){return useMindMapMutation(paperId,(input:{id:string;title:string;summary:string})=>updateMindMapNode(paperId,input.id,{title:input.title,summary:input.summary}));}
+export function useDeleteMindMapNode(paperId:string){return useMindMapMutation(paperId,(id:string)=>deleteMindMapNode(paperId,id));}
+export function useCreateMindMapEdge(paperId:string){return useMindMapMutation(paperId,(input:{source:string;target:string;relation:string})=>createMindMapEdge(paperId,input));}
+export function useUpdateMindMapEdge(paperId:string){return useMindMapMutation(paperId,(input:{id:string;relation:string})=>updateMindMapEdge(paperId,input.id,input.relation));}
+export function useDeleteMindMapEdge(paperId:string){return useMindMapMutation(paperId,(id:string)=>deleteMindMapEdge(paperId,id));}

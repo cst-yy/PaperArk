@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Database, HardDrive, LoaderCircle, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDollarSign, Database, HardDrive, LoaderCircle, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { useBackupProtection, useBackups, useCreateBackup, useDeleteBackup, useRestoreBackup, useUpdateBackupProtection, useVerifyBackup, useWorkspaceInfo } from "@/features/workspace/hooks";
 import type { BackupItem } from "@/features/workspace/types";
+import { ResearchIdentitySettings } from "@/features/research-identity/ResearchIdentitySettings";
 
 function formatBytes(value: number) {
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
@@ -75,6 +77,13 @@ export default function Settings() {
       </div>
 
       {message && <div className="mb-4 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-800 dark:border-primary-900 dark:bg-primary-950 dark:text-primary-200">{message}</div>}
+
+      <ResearchIdentitySettings />
+
+      <section className="card mb-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3"><CircleDollarSign className="h-5 w-5 text-emerald-500"/><div><h2 className="text-sm font-semibold">AI 用量与费用</h2><p className="mt-0.5 text-xs text-gray-500">查看 Token、请求明细、模型费用与预算。</p></div></div>
+        <Link className="btn-ghost shrink-0 text-xs" to="/settings/ai-usage#models">模型与费用设置 →</Link>
+      </section>
 
       <section className="card mb-4">
         <div className="mb-4 flex items-center gap-2"><HardDrive className="h-4 w-4 text-primary-500" /><h2 className="text-sm font-semibold">工作区</h2></div>

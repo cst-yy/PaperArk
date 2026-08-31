@@ -8,10 +8,11 @@ from sqlalchemy import select
 from app.core.exceptions import DocumentParseError
 from app.models import Document, Paper, Reference, Section, User
 from app.parsers.chunker import DerivedChunk
+from app.parsers.base import ParsedDocument, ParsedPage
 from app.parsers.reference_matcher import ReferenceMatch, ReferenceMatcher
 from app.parsers.reference_metadata_parser import ParsedReference, ReferenceMetadataParser, normalize_arxiv_id, normalize_doi
 from app.parsers.reference_segmenter import ReferenceSegmenter
-from app.parsers.section_detector import DetectedSection, TextFragment
+from app.parsers.section_detector import DetectedSection, SectionDetector, TextFragment
 from app.services.document_derived_service import DerivedDocumentSnapshot, DocumentDerivedService
 
 
@@ -55,6 +56,78 @@ def test_segmenter_supports_author_year_when_no_numbered_starters():
         "Smith, J., 2022. A first article.",
         "Brown, A., 2021. A second article.",
     ]
+
+
+def test_reference_author_initial_is_not_detected_as_roman_section_heading():
+    parsed = ParsedDocument(
+        page_count=2,
+        pages=[
+            ParsedPage(1, "REFERENCES\n[1] A. Author. First article.", 612, 792),
+            ParsedPage(
+                2,
+                "C. Xu, Y. Qu, Y. Xiang, and L. Gao, “Asynchronous federated learning.”\n"
+                "[2] B. Author. Second article.",
+                612,
+                792,
+            ),
+        ],
+        metadata={},
+    )
+
+    sections = SectionDetector().detect(parsed)
+
+    assert len(sections) == 1
+    assert sections[0].section_type == "references"
+    assert "C. Xu" in sections[0].raw_text
+
+
+def test_references_section_is_not_truncated_by_common_heading_words():
+    parsed = ParsedDocument(
+        page_count=1,
+        pages=[ParsedPage(1, "References\nSmith, J. (2022). Adaptive methods for learning.\nmethods\nBrown, A. (2021). Another article.", 612, 792)],
+        metadata={},
+    )
+
+    sections = SectionDetector().detect(parsed)
+
+    assert len(sections) == 1
+    assert sections[0].section_type == "references"
+    assert "Brown, A." in sections[0].raw_text
+
+
+def test_explicit_paper_checklist_ends_references_section():
+    parsed = ParsedDocument(
+        page_count=2,
+        pages=[
+            ParsedPage(1, "References\nSmith, J. (2022). Article.", 612, 792),
+            ParsedPage(2, "NeurIPS Paper Checklist\nClaims Question: Are claims supported?", 612, 792),
+        ],
+        metadata={},
+    )
+
+    sections = SectionDetector().detect(parsed)
+
+    assert [section.section_type for section in sections] == ["references", "other"]
+    assert "Claims Question" not in sections[0].raw_text
+
+
+def test_segmenter_reconstructs_word_per_line_author_year_bibliography():
+    section = DetectedSection(
+        id=uuid.uuid4(), parent_id=None, title="References", section_type="references",
+        level=1, order_index=0, page_start=10, page_end=10,
+        fragments=[TextFragment(10, token) for token in (
+            "Alam,", "F.,", "Ofli,", "F.,", "&", "Imran,", "M.", "(2018).", "First", "article.",
+            "Bao,", "G.,", "Zhang,", "Q.,", "&", "Miao,", "D.", "(2023).", "Second", "article.",
+            "Zhao,", "Y.,", "Barnaghi,", "P.,", "&", "Haddadi,", "H.", "(2022).", "Third", "article.",
+        )],
+    )
+
+    entries = ReferenceSegmenter().segment([section])
+
+    assert len(entries) == 3
+    assert entries[0].raw_text.startswith("Alam, F.")
+    assert entries[1].raw_text.startswith("Bao, G.")
+    assert entries[2].raw_text.startswith("Zhao, Y.")
 
 
 def test_metadata_parser_normalizes_stable_identifiers():

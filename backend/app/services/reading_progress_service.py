@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import DocumentNotFoundError, PaperNotFoundError
-from app.models import Document, Paper, ReadingProgress
+from app.models import Document, Paper, ReadingProgress, ResearchIdentity
 from app.repositories.paper_repository import PaperRepository
 from app.repositories.reading_progress_repository import ReadingProgressRepository
 from app.schemas.reading_progress import (
@@ -60,9 +60,15 @@ class ReadingProgressService:
         user_id: uuid.UUID,
         *,
         limit: int,
+        mine: bool = False,
     ) -> list[RecentReadingItem]:
-        records = await self.repo.list_recent(user_id, limit=limit)
-        return [self._to_recent_item(progress, paper) for progress, paper in records]
+        identity_author_id = None
+        if mine:
+            identity = await self.db.scalar(select(ResearchIdentity).where(ResearchIdentity.user_id == user_id))
+            if identity is None: return []
+            identity_author_id = identity.author_id
+        records = await self.repo.list_recent(user_id, limit=limit, identity_author_id=identity_author_id)
+        return [self._to_recent_item(progress, paper, identity_author_id) for progress, paper in records]
 
     async def _get_owned_document(
         self, user_id: uuid.UUID, paper_id: uuid.UUID, document_id: uuid.UUID
@@ -102,8 +108,10 @@ class ReadingProgressService:
     def _to_recent_item(
         progress: ReadingProgress,
         paper: Paper,
+        identity_author_id: uuid.UUID | None = None,
     ) -> RecentReadingItem:
         authors = sorted(paper.authors, key=lambda assignment: assignment.author_order)
+        identity_link = next((link for link in authors if link.author_id == identity_author_id), None)
         return RecentReadingItem(
             paper=RecentReadingPaper(
                 id=paper.id,
@@ -111,6 +119,12 @@ class ReadingProgressService:
                 publication_year=paper.publication_year,
                 authors=[assignment.author.name for assignment in authors],
                 is_starred=paper.is_starred,
+                my_author_roles={
+                    "author_order": identity_link.author_order,
+                    "is_first_author": identity_link.author_order == 0,
+                    "is_co_first": identity_link.is_co_first,
+                    "is_corresponding": identity_link.is_corresponding,
+                } if identity_link else None,
             ),
             document=RecentReadingDocument(id=progress.document_id),
             current_page=progress.current_page,

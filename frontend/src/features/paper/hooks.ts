@@ -40,6 +40,10 @@ export function useCreatePaper() {
     mutationFn: (data: PaperCreateInput) => createPaper(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["papers"] });
+      queryClient.invalidateQueries({ queryKey: ["paper-list"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["tags"] });
     },
   });
 }
@@ -157,6 +161,7 @@ export function useParseDocument() {
       queryClient.invalidateQueries({ queryKey: ["document-sections", documentId] });
       queryClient.invalidateQueries({ queryKey: ["document-references", documentId] });
       queryClient.invalidateQueries({ queryKey: ["document-elements", documentId] });
+      queryClient.invalidateQueries({ queryKey: ["translation-page"] });
     },
   });
 }
@@ -168,6 +173,7 @@ export function useDeletePaper() {
     onSuccess: (_, paperId) => {
       queryClient.removeQueries({ queryKey: ["paper", paperId], exact: true });
       queryClient.invalidateQueries({ queryKey: ["papers"] });
+      queryClient.invalidateQueries({ queryKey: ["paper-list"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["tags"] });
     },

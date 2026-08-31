@@ -51,18 +51,6 @@ class AIModelCreate(BaseModel):
     capabilities: dict = Field(default_factory=lambda: {"generation": True, "structured_output": True})
 
 
-class AIModelResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
-    id: UUID
-    provider_id: UUID
-    model_name: str
-    display_name: str | None
-    context_window: int | None
-    max_output_tokens: int | None
-    capabilities: dict
-    enabled: bool
-
-
 class AIModelPricingCreate(BaseModel):
     currency: str = Field("USD", min_length=3, max_length=8)
     input_per_million: Decimal | None = Field(None, ge=0)
@@ -80,6 +68,26 @@ class AIModelPricingResponse(BaseModel):
     output_per_million: Decimal | None
     effective_from: datetime
     effective_to: datetime | None
+
+
+class AIModelResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+    id: UUID
+    provider_id: UUID
+    model_name: str
+    display_name: str | None
+    context_window: int | None
+    max_output_tokens: int | None
+    capabilities: dict
+    enabled: bool
+    # Current effective price, exposed so the settings UI can reflect the
+    # selected model immediately instead of retaining the previous model's
+    # values in uncontrolled form fields.
+    pricing: AIModelPricingResponse | None = None
+
+
+class AIDefaultModelUpdate(BaseModel):
+    model_id: UUID
 
 
 class AIBudgetCreate(BaseModel):

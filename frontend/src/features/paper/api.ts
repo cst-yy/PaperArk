@@ -2,7 +2,10 @@ import { api } from "@/services/api";
 import type { Paper, PaperPage, PaperListParams, PaperCreateInput, PaperMetadataUpdate, PaperReadingStatus, ReplaceAuthorsRequest, ReplaceFoldersRequest, ReplaceTagsRequest } from "./types";
 
 export async function listPapers(params: PaperListParams = {}): Promise<PaperPage> {
-  const response = await api.get<PaperPage>("/papers/", { params });
+  const { mine, author_role, ...rest } = params;
+  const response = await api.get<PaperPage>(mine ? "/my-papers" : "/papers/", {
+    params: mine ? { ...rest, authorship: author_role ?? "all" } : params,
+  });
   return response.data;
 }
 

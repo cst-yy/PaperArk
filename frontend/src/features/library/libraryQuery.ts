@@ -8,6 +8,7 @@ export interface LibraryQuery {
   starred?: boolean;
   status?: PaperProcessingStatus;
   reading_status?: PaperReadingStatus;
+  author_role?: "first" | "corresponding" | "other";
   page: number;
   page_size: number;
 }
@@ -16,6 +17,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZES = new Set([10, 20, 50, 100]);
 const PROCESSING_STATUSES = new Set<PaperProcessingStatus>(["imported", "processing", "ready", "failed"]);
 const READING_STATUSES = new Set<PaperReadingStatus>(["unread", "reading", "finished", "archived"]);
+const AUTHOR_ROLES = new Set(["first", "corresponding", "other"]);
 
 export function parseLibraryQuery(searchParams: URLSearchParams): LibraryQuery {
   const rawYear = Number(searchParams.get("year"));
@@ -31,6 +33,7 @@ export function parseLibraryQuery(searchParams: URLSearchParams): LibraryQuery {
     starred: searchParams.get("starred") === "true" ? true : undefined,
     status: rawStatus && PROCESSING_STATUSES.has(rawStatus as PaperProcessingStatus) ? rawStatus as PaperProcessingStatus : undefined,
     reading_status: rawReadingStatus && READING_STATUSES.has(rawReadingStatus as PaperReadingStatus) ? rawReadingStatus as PaperReadingStatus : undefined,
+    author_role: AUTHOR_ROLES.has(searchParams.get("author_role") ?? "") ? searchParams.get("author_role") as LibraryQuery["author_role"] : undefined,
     page: Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1,
     page_size: PAGE_SIZES.has(rawPageSize) ? rawPageSize : DEFAULT_PAGE_SIZE,
   };
@@ -47,6 +50,8 @@ export function toPaperListParams(query: LibraryQuery): PaperListParams {
     reading_status: query.reading_status,
     page: query.page,
     page_size: query.page_size,
+    mine: true,
+    author_role: query.author_role,
   };
 }
 
@@ -61,6 +66,7 @@ export function updateLibraryQuery(current: URLSearchParams, patch: Partial<Libr
     starred: merged.starred ? "true" : undefined,
     status: merged.status,
     reading_status: merged.reading_status,
+    author_role: merged.author_role,
   };
   for (const [key, value] of Object.entries(values)) {
     if (value) next.set(key, value); else next.delete(key);

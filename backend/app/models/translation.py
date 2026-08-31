@@ -13,6 +13,7 @@ class PageBlock(Base):
     __table_args__ = (
         UniqueConstraint("document_id", "page_number", "block_order", name="uq_page_blocks_document_page_order"),
         Index("ix_page_blocks_document_reading", "document_id", "page_number", "reading_order"),
+        Index("ix_page_blocks_document_page_name", "document_id", "page_number", "name"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -23,9 +24,12 @@ class PageBlock(Base):
     block_order: Mapped[int] = mapped_column(Integer)
     reading_order: Mapped[int] = mapped_column(Integer)
     block_type: Mapped[str] = mapped_column(String(32), default="paragraph", server_default="paragraph")
+    name: Mapped[str] = mapped_column(String(255), default="整页", server_default="整页")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", index=True)
     column_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     parent_block_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("page_blocks.id", ondelete="SET NULL"), nullable=True)
     bounding_box: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    text_style: Mapped[dict] = mapped_column(JSON, default=lambda: {"font_size": 12, "color": "#1f2937"}, server_default='{"font_size": 12, "color": "#1f2937"}')
     source_text: Mapped[str] = mapped_column(Text)
     normalized_text: Mapped[str] = mapped_column(Text)
     source_hash: Mapped[str] = mapped_column(String(64), index=True)

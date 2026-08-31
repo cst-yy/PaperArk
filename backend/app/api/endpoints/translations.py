@@ -73,6 +73,13 @@ async def update_block(block_id: uuid.UUID, data: TranslationBlockUpdate, db: As
     except RuntimeError as exc: raise HTTPException(409,detail="译文已在其他页面更新，请刷新后重试") from exc
 
 
+@router.put("/papers/{paper_id}/translations/manual-block", response_model=TranslationBlockResponse)
+async def save_manual_block(paper_id: uuid.UUID, data: ManualTranslationBlockSave, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    try: return await TranslationService(db).save_manual_block(user_id, paper_id, data)
+    except (LookupError, ValueError) as exc: raise problem(exc) from exc
+    except RuntimeError as exc: raise HTTPException(409, detail="译文已在其他页面更新，请刷新后重试") from exc
+
+
 @router.get("/translation-glossary", response_model=list[GlossaryResponse])
 async def glossary(paper_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
     query=select(TranslationGlossary).where(TranslationGlossary.user_id==user_id)

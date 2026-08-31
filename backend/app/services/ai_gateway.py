@@ -10,7 +10,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import AIBudgetPolicy, AIBudgetReservation, AIModelPricing, AIRequestRecord
+from app.models import AIBudgetPolicy, AIBudgetReservation, AIModel, AIModelPricing, AIProvider, AIRequestRecord, Setting
 from app.processors.generation import GenerationMessage, GenerationProvider, GenerationResult, OpenAICompatibleGenerationProvider
 from app.services.ai_cost import PriceSnapshot, calculate_cost, estimate_tokens
 from app.services.ai_provider_service import AIProviderService
@@ -31,6 +31,15 @@ class AIGateway:
                        context_id: uuid.UUID | None = None,
                        fallback_provider: GenerationProvider | None = None) -> tuple[GenerationResult, AIRequestRecord]:
         provider_row = model_row = None
+        if model_id is None:
+            preferred = await self.db.scalar(select(Setting.value).where(Setting.user_id == user_id, Setting.key == "ai.default_model_id"))
+            if preferred:
+                try: model_id = uuid.UUID(preferred)
+                except ValueError: model_id = None
+            if model_id is None:
+                model_id = await self.db.scalar(select(AIModel.id).join(AIProvider).where(
+                    AIProvider.user_id == user_id, AIProvider.enabled.is_(True), AIModel.enabled.is_(True)
+                ).order_by(AIModel.created_at).limit(1))
         if model_id:
             provider_row, model_row, adapter = await AIProviderService(self.db).adapter(user_id, model_id)
             await self.db.refresh(provider_row, with_for_update=True)

@@ -12,12 +12,12 @@ interface OutlinePanelProps {
 
 export function OutlinePanel({ items, isLoading, activePage, onJumpToPage }: OutlinePanelProps) {
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+    <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 text-sm font-medium text-gray-800 dark:border-slate-700 dark:text-gray-100">
         <ListTree className="h-4 w-4" />
         目录
       </div>
-      <div className="flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {isLoading ? (
           <p className="p-2 text-sm text-gray-400">正在读取目录…</p>
         ) : items.length ? (

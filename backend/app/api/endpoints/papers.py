@@ -11,6 +11,7 @@ or manage transactions. All of that lives in Service + Storage.
 """
 
 import uuid
+from typing import Literal
 
 from fastapi import (
     APIRouter,
@@ -21,6 +22,8 @@ from fastapi import (
     UploadFile,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models import ResearchIdentity
 
 from app.core.database import get_current_user_id, get_db
 from app.core.exceptions import (
@@ -71,7 +74,7 @@ from app.schemas.knowledge_relation import (
 from app.services.knowledge_relation_service import KnowledgeRelationService
 from app.services.relation_suggestion_service import RelationSuggestionService
 from app.processors.generation import GenerationProvider, OpenAICompatibleGenerationProvider
-from app.schemas.mind_map import MindMapResponse
+from app.schemas.mind_map import ManualMindMapEdgeCreate, ManualMindMapEdgeUpdate, ManualMindMapNodeCreate, ManualMindMapNodeUpdate, MindMapResponse
 from app.services.mind_map_service import MindMapService
 
 router = APIRouter()
@@ -110,6 +113,48 @@ async def get_paper_mind_map(
 ):
     try: return await MindMapService(db).get(user_id, paper_id)
     except PaperNotFoundError as error: raise HTTPException(status_code=404, detail=error.message) from error
+
+
+@router.post("/{paper_id}/mind-map/nodes", response_model=MindMapResponse, status_code=201)
+async def create_mind_map_node(paper_id: uuid.UUID, data: ManualMindMapNodeCreate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    service = MindMapService(db)
+    try: await service.create_node(user_id, paper_id, data); return await service.get(user_id, paper_id)
+    except PaperNotFoundError as error: raise HTTPException(404, detail=error.message) from error
+
+
+@router.put("/{paper_id}/mind-map/nodes/{node_id}", response_model=MindMapResponse)
+async def update_mind_map_node(paper_id: uuid.UUID, node_id: uuid.UUID, data: ManualMindMapNodeUpdate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    service = MindMapService(db)
+    try: await service.update_node(user_id, paper_id, node_id, data); return await service.get(user_id, paper_id)
+    except LookupError as error: raise HTTPException(404, detail=str(error)) from error
+
+
+@router.delete("/{paper_id}/mind-map/nodes/{node_id}", response_model=MindMapResponse)
+async def delete_mind_map_node(paper_id: uuid.UUID, node_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    service = MindMapService(db)
+    try: await service.delete_node(user_id, paper_id, node_id); return await service.get(user_id, paper_id)
+    except LookupError as error: raise HTTPException(404, detail=str(error)) from error
+
+
+@router.post("/{paper_id}/mind-map/edges", response_model=MindMapResponse, status_code=201)
+async def create_mind_map_edge(paper_id: uuid.UUID, data: ManualMindMapEdgeCreate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    service = MindMapService(db)
+    try: await service.create_edge(user_id, paper_id, data); return await service.get(user_id, paper_id)
+    except ValueError as error: raise HTTPException(422, detail=str(error)) from error
+
+
+@router.put("/{paper_id}/mind-map/edges/{edge_id}", response_model=MindMapResponse)
+async def update_mind_map_edge(paper_id: uuid.UUID, edge_id: uuid.UUID, data: ManualMindMapEdgeUpdate, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    service = MindMapService(db)
+    try: await service.update_edge(user_id, paper_id, edge_id, data); return await service.get(user_id, paper_id)
+    except LookupError as error: raise HTTPException(404, detail=str(error)) from error
+
+
+@router.delete("/{paper_id}/mind-map/edges/{edge_id}", response_model=MindMapResponse)
+async def delete_mind_map_edge(paper_id: uuid.UUID, edge_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
+    service = MindMapService(db)
+    try: await service.delete_edge(user_id, paper_id, edge_id); return await service.get(user_id, paper_id)
+    except LookupError as error: raise HTTPException(404, detail=str(error)) from error
 
 # ── Exception -> HTTP status code mapping ──
 
@@ -182,12 +227,20 @@ async def list_papers(
     starred: bool | None = Query(None),
     status: str | None = Query(None, description="处理状态"),
     reading_status: ReadingStatus | None = Query(None, description="阅读状态"),
+    mine: bool = Query(False, description="仅显示研究身份参与署名的论文"),
+    author_role: Literal["first", "corresponding", "other"] | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     service: PaperService = Depends(get_paper_service),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     """List papers with optional filters and pagination."""
+    identity_author_id = None
+    if mine or author_role:
+        identity = await service.db.scalar(select(ResearchIdentity).where(ResearchIdentity.user_id == user_id))
+        if identity is None:
+            return PaperPageResponse(items=[], page=page, page_size=page_size, total=0, total_pages=0)
+        identity_author_id = identity.author_id
     return await service.list_papers(
         user_id=user_id,
         q=q,
@@ -197,6 +250,8 @@ async def list_papers(
         starred=starred,
         status=status,
         reading_status=reading_status,
+        identity_author_id=identity_author_id,
+        author_role=author_role,
         page=page,
         page_size=page_size,
     )

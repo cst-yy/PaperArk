@@ -22,6 +22,7 @@ export interface RecentReadingItem {
     publication_year: number | null;
     authors: string[];
     is_starred: boolean;
+    my_author_roles?: { author_order:number; is_first_author:boolean; is_co_first:boolean; is_corresponding:boolean } | null;
   };
   document: {
     id: string;

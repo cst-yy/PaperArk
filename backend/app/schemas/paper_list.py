@@ -174,3 +174,13 @@ class BatchPaperDelete(BaseModel):
     @classmethod
     def unique_ids(cls, value: list[UUID]) -> list[UUID]:
         return list(dict.fromkeys(value))
+
+
+class PaperListExportRequest(BaseModel):
+    paper_ids: list[UUID] | None = Field(None, max_length=200)
+    columns: list[PaperListColumn] | None = None
+
+    @field_validator("paper_ids", "columns", mode="after")
+    @classmethod
+    def unique_export_values(cls, value):
+        return list(dict.fromkeys(value)) if value else value

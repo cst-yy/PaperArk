@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.models import (AIModelPricing, Document, PageBlock, Paper, PaperTranslation,
-                        Section, TranslationBlock, TranslationGlossary, TranslationJob)
-from app.schemas.translation import TranslationCreateRequest, TranslationEstimateRequest, TranslationEstimateResponse, TranslationPageResponse
+from app.models import (AIModel, AIModelPricing, AIProvider, Document, PageBlock, Paper, PaperTranslation,
+                        Section, Setting, TranslationBlock, TranslationGlossary, TranslationJob)
+from app.schemas.translation import ManualTranslationBlockSave, TranslationCreateRequest, TranslationEstimateRequest, TranslationEstimateResponse, TranslationPageResponse
 from app.services.ai_cost import PriceSnapshot, calculate_cost, estimate_tokens
 from app.services.ai_gateway import AIBudgetExceededError, AIGateway
 
@@ -33,7 +33,8 @@ class TranslationService:
         chars = sum(len(b.source_text) for b in pending)
         input_tokens = estimate_tokens(" ".join(b.source_text for b in pending)) + len(pending) * 12
         output_tokens = max(1, int(input_tokens * 1.25)) if pending else 0
-        price = await self._price(request.model_id)
+        model_id = await self._resolve_model_id(user_id, request.model_id)
+        price = await self._price(model_id)
         cost = calculate_cost(input_tokens, 0, output_tokens, price) if price else None
         return TranslationEstimateResponse(total_blocks=len(blocks), reusable_blocks=len(blocks)-len(pending),
             pending_blocks=len(pending), source_characters=chars, estimated_input_tokens=input_tokens,
@@ -43,12 +44,12 @@ class TranslationService:
     async def create(self, user_id: uuid.UUID, paper_id: uuid.UUID, request: TranslationCreateRequest, *, process_immediately: bool = True) -> TranslationJob:
         if not request.confirmed: raise ValueError("翻译必须经过费用预览并明确确认")
         paper, document = await self._source(user_id, paper_id, request.document_id)
+        model_id = await self._resolve_model_id(user_id, request.model_id)
         if paper.ai_access_policy == "disabled": raise PermissionError("该论文已禁止 AI 处理")
-        if paper.ai_access_policy == "local_only" and request.model_id:
-            from app.models import AIModel, AIProvider
-            local = await self.db.scalar(select(AIProvider.is_local).join(AIModel).where(AIModel.id == request.model_id, AIProvider.user_id == user_id))
+        if paper.ai_access_policy == "local_only" and model_id:
+            local = await self.db.scalar(select(AIProvider.is_local).join(AIModel).where(AIModel.id == model_id, AIProvider.user_id == user_id))
             if not local: raise PermissionError("该论文仅允许本地 AI Provider")
-        estimate = await self.estimate(user_id, paper_id, request)
+        estimate = await self.estimate(user_id, paper_id, request.model_copy(update={"model_id": model_id}))
         if request.max_cost is not None and estimate.estimated_cost is not None and estimate.estimated_cost > request.max_cost:
             raise ValueError("预计费用超过本次确认预算")
         blocks = await self._blocks(document.id, request)
@@ -59,12 +60,12 @@ class TranslationService:
         if not translation:
             translation = PaperTranslation(user_id=user_id, paper_id=paper_id, document_id=document.id,
                 source_pdf_hash=document.file_hash or "", source_language="en", target_language=request.target_language,
-                provider_id=None, model_id=request.model_id, prompt_version=PROMPT_VERSION,
+                provider_id=None, model_id=model_id, prompt_version=PROMPT_VERSION,
                 parser_version=document.parser_version or "unknown", status="pending", is_active=True)
             self.db.add(translation); await self.db.flush()
         job = TranslationJob(user_id=user_id, paper_id=paper_id, paper_translation_id=translation.id,
             scope_type=request.scope_type, scope_start=request.page_number, scope_end=request.page_number,
-            model_id=request.model_id, source_language="en", target_language=request.target_language,
+            model_id=model_id, source_language="en", target_language=request.target_language,
             block_ids=[str(b.id) for b in blocks], total_blocks=len(blocks), estimated_cost=estimate.estimated_cost)
         self.db.add(job); await self.db.flush()
         await self.db.commit()
@@ -175,8 +176,66 @@ class TranslationService:
             TranslationBlock.revision == expected_revision).values(user_translation=text.strip() if text and text.strip() else None,
             revision=TranslationBlock.revision + 1).returning(TranslationBlock.id))
         if result.scalar_one_or_none() is None: raise RuntimeError("revision_conflict")
-        await self.db.flush()
-        return await self.db.get(TranslationBlock, block_id)
+        await self.db.commit()
+        row = await self.db.get(TranslationBlock, block_id)
+        assert row is not None
+        await self.db.refresh(row)
+        return row
+
+    async def save_manual_block(self, user_id: uuid.UUID, paper_id: uuid.UUID, request: ManualTranslationBlockSave) -> TranslationBlock:
+        _, document = await self._source(user_id, paper_id, request.document_id)
+        block = await self.db.scalar(select(PageBlock).where(
+            PageBlock.id == request.page_block_id,
+            PageBlock.document_id == document.id,
+            PageBlock.paper_id == paper_id,
+        ))
+        if not block:
+            raise LookupError("Page block not found")
+
+        translation = await self.db.scalar(select(PaperTranslation).where(
+            PaperTranslation.user_id == user_id,
+            PaperTranslation.paper_id == paper_id,
+            PaperTranslation.document_id == document.id,
+            PaperTranslation.source_pdf_hash == (document.file_hash or ""),
+            PaperTranslation.target_language == request.target_language,
+            PaperTranslation.is_active.is_(True),
+        ).order_by(PaperTranslation.updated_at.desc()))
+        if not translation:
+            translation = PaperTranslation(
+                user_id=user_id, paper_id=paper_id, document_id=document.id,
+                source_pdf_hash=document.file_hash or "", source_language="en",
+                target_language=request.target_language, prompt_version="manual-v1",
+                parser_version=document.parser_version or "unknown",
+                status="partially_completed", is_active=True,
+            )
+            self.db.add(translation)
+            await self.db.flush()
+
+        row = await self.db.scalar(select(TranslationBlock).where(
+            TranslationBlock.paper_translation_id == translation.id,
+            TranslationBlock.page_block_id == block.id,
+        ))
+        value = request.user_translation.strip()
+        if row:
+            if request.expected_revision is not None and row.revision != request.expected_revision:
+                raise RuntimeError("revision_conflict")
+            row.user_translation = value
+            row.status = "completed"
+            row.error_message = None
+            row.translated_at = datetime.now(timezone.utc)
+            row.revision += 1
+        else:
+            row = TranslationBlock(
+                paper_translation_id=translation.id, page_block_id=block.id,
+                source_hash=block.source_hash, machine_translation=None,
+                user_translation=value, prompt_version="manual-v1", status="completed",
+                translated_at=datetime.now(timezone.utc), revision=1,
+            )
+            self.db.add(row)
+        translation.status = "partially_completed"
+        await self.db.commit()
+        await self.db.refresh(row)
+        return row
 
     async def set_status(self, user_id: uuid.UUID, job_id: uuid.UUID, status: str) -> TranslationJob:
         job = await self._job(user_id, job_id)
@@ -218,6 +277,31 @@ class TranslationService:
             PaperTranslation.paper_id == paper_id, PaperTranslation.source_pdf_hash == pdf_hash,
             PaperTranslation.target_language == language, TranslationBlock.source_hash.in_(hashes),
             TranslationBlock.status == "completed"))).all())
+
+    async def _resolve_model_id(self, user_id: uuid.UUID, requested: uuid.UUID | None) -> uuid.UUID | None:
+        if requested:
+            owned = await self.db.scalar(select(AIModel.id).join(AIProvider).where(
+                AIModel.id == requested, AIProvider.user_id == user_id,
+                AIProvider.enabled.is_(True), AIModel.enabled.is_(True)))
+            if not owned:
+                raise LookupError("AI model not found or disabled")
+            return owned
+        preferred = await self.db.scalar(select(Setting.value).where(
+            Setting.user_id == user_id, Setting.key == "ai.default_model_id"))
+        if preferred:
+            try:
+                candidate = uuid.UUID(preferred)
+            except ValueError:
+                candidate = None
+            if candidate:
+                owned = await self.db.scalar(select(AIModel.id).join(AIProvider).where(
+                    AIModel.id == candidate, AIProvider.user_id == user_id,
+                    AIProvider.enabled.is_(True), AIModel.enabled.is_(True)))
+                if owned:
+                    return owned
+        return await self.db.scalar(select(AIModel.id).join(AIProvider).where(
+            AIProvider.user_id == user_id, AIProvider.enabled.is_(True), AIModel.enabled.is_(True)
+        ).order_by(AIModel.created_at))
 
     async def _price(self, model_id):
         if not model_id: return None

@@ -33,9 +33,11 @@ class PaperListRepository:
     async def list_rows(self, user_id: uuid.UUID, *, q: str | None, year_from: int | None, year_to: int | None,
                         journal: str | None, author: str | None, tag_id: uuid.UUID | None, keyword: str | None,
                         reading_status: str | None, starred: bool | None, sort: str, order: str,
-                        offset: int, limit: int) -> PaperListQueryResult:
+                        offset: int, limit: int, paper_ids: list[uuid.UUID] | None = None) -> PaperListQueryResult:
         note_count = select(func.count(Note.id)).where(Note.paper_id == Paper.id, Note.user_id == user_id).correlate(Paper).scalar_subquery()
         filters = [Paper.user_id == user_id]
+        if paper_ids is not None:
+            filters.append(Paper.id.in_(paper_ids))
 
         def author_exists(pattern: str):
             return exists(select(PaperAuthor.id).join(Author, Author.id == PaperAuthor.author_id).where(PaperAuthor.paper_id == Paper.id, Author.name.ilike(pattern)))

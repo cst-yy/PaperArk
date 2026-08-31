@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -82,6 +82,7 @@ class ReadingProgressRepository:
         user_id: uuid.UUID,
         *,
         limit: int,
+        identity_author_id: uuid.UUID | None = None,
     ) -> list[tuple[ReadingProgress, Paper]]:
         """Return concrete PDF reading records, newest first, with safe paper scope."""
         statement = (
@@ -98,5 +99,10 @@ class ReadingProgressRepository:
             .order_by(ReadingProgress.last_read_at.desc(), ReadingProgress.id.desc())
             .limit(limit)
         )
+        if identity_author_id is not None:
+            statement = statement.where(exists(select(PaperAuthor.id).where(
+                PaperAuthor.paper_id == Paper.id,
+                PaperAuthor.author_id == identity_author_id,
+            )))
         result = await self.db.execute(statement)
         return list(result.all())

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.secret_crypto import decrypt_secret, encrypt_secret
 from app.models import AIModel, AIModelPricing, AIProvider
@@ -44,6 +45,10 @@ class AIProviderService:
         for key, value in values.items():
             setattr(row, key, value.rstrip("/") if key == "base_url" else value)
         await self.db.flush()
+        # updated_at is server-generated with ``onupdate`` and SQLAlchemy may
+        # expire it during flush. Refresh explicitly before constructing the
+        # response; otherwise async attribute access triggers MissingGreenlet.
+        await self.db.refresh(row)
         return self._response(row)
 
     async def delete(self, user_id: uuid.UUID, provider_id: uuid.UUID) -> None:
@@ -68,7 +73,7 @@ class AIProviderService:
         return row
 
     async def list_models(self, user_id: uuid.UUID) -> list[AIModel]:
-        return list((await self.db.scalars(select(AIModel).join(AIProvider).where(AIProvider.user_id == user_id).order_by(AIModel.created_at))).all())
+        return list((await self.db.scalars(select(AIModel).options(selectinload(AIModel.prices)).join(AIProvider).where(AIProvider.user_id == user_id).order_by(AIModel.created_at))).all())
 
     async def add_pricing(self, user_id: uuid.UUID, model_id: uuid.UUID, data: AIModelPricingCreate) -> AIModelPricing:
         model = await self.db.scalar(select(AIModel).join(AIProvider).where(AIModel.id == model_id, AIProvider.user_id == user_id))
@@ -82,6 +87,17 @@ class AIProviderService:
         self.db.add(row)
         await self.db.flush()
         return row
+
+    async def current_pricing(self, user_id: uuid.UUID, model_id: uuid.UUID) -> AIModelPricing | None:
+        """Return the current effective price for an owned model."""
+        model = await self.db.scalar(select(AIModel).join(AIProvider).where(AIModel.id == model_id, AIProvider.user_id == user_id))
+        if not model:
+            raise LookupError("AI model not found")
+        return await self.db.scalar(
+            select(AIModelPricing)
+            .where(AIModelPricing.model_id == model_id, AIModelPricing.effective_to.is_(None))
+            .order_by(AIModelPricing.effective_from.desc())
+        )
 
     async def adapter(self, user_id: uuid.UUID, model_id: uuid.UUID) -> tuple[AIProvider, AIModel, OpenAICompatibleGenerationProvider]:
         model = await self.db.scalar(select(AIModel).join(AIProvider).where(AIModel.id == model_id, AIProvider.user_id == user_id, AIProvider.enabled.is_(True), AIModel.enabled.is_(True)))

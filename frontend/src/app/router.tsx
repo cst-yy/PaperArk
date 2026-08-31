@@ -4,7 +4,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./layout";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
-const Library = lazy(() => import("@/pages/Library"));
+const MyPapers = lazy(() => import("@/pages/MyPapers"));
 const PaperList = lazy(() => import("@/pages/PaperList"));
 const Reader = lazy(() => import("@/pages/Reader"));
 const Notes = lazy(() => import("@/pages/Notes"));
@@ -26,7 +26,7 @@ export function AppRouter() {
     <Suspense fallback={<RouteLoading />}><Routes>
       <Route element={<AppLayout />}>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/library" element={<Library />} />
+        <Route path="/library" element={<MyPapers />} />
         <Route path="/papers" element={<PaperList />} />
         <Route path="/favorites" element={<Navigate to="/library?starred=true" replace />} />
         <Route path="/notes" element={<Notes />} />

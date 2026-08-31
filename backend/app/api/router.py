@@ -23,6 +23,8 @@ from app.api.endpoints import (
     workspace,
     todos,
     memos,
+    research_identity,
+    my_papers,
 )
 
 api_router = APIRouter()
@@ -30,6 +32,8 @@ api_router = APIRouter()
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(todos.router, prefix="/todos", tags=["todos"])
 api_router.include_router(memos.router, prefix="/memos", tags=["memos"])
+api_router.include_router(research_identity.router, prefix="/research-identity", tags=["research-identity"])
+api_router.include_router(my_papers.router, prefix="/my-papers", tags=["my-papers"])
 api_router.include_router(papers.router, prefix="/papers", tags=["papers"])
 api_router.include_router(paper_list.router, prefix="/paper-list", tags=["paper-list"])
 api_router.include_router(reading.router, prefix="/reading", tags=["reading"])

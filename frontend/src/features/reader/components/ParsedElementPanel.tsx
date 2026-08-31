@@ -10,9 +10,9 @@ interface ParsedElementPanelProps {
 export function ParsedElementPanel({ elements, isLoading, onJumpToPage }: ParsedElementPanelProps) {
   const figures = elements.filter((element) => element.element_type === "figure");
   const tables = elements.filter((element) => element.element_type === "table");
-  return <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+  return <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-900">
     <div className="border-b border-gray-100 px-4 py-3 text-sm font-medium text-gray-800 dark:border-slate-700 dark:text-gray-100">文档元素</div>
-    <div className="flex-1 overflow-y-auto p-2">
+    <div className="min-h-0 flex-1 overflow-y-auto p-2">
       {isLoading ? <p className="p-2 text-sm text-gray-400">正在读取文档元素…</p> : elements.length ? <>
         <ElementGroup title={`Figures (${figures.length})`} icon={<BarChart2 className="h-3.5 w-3.5" />} elements={figures} onJumpToPage={onJumpToPage} />
         <ElementGroup title={`Tables (${tables.length})`} icon={<Table2 className="h-3.5 w-3.5" />} elements={tables} onJumpToPage={onJumpToPage} />

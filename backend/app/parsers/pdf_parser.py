@@ -8,7 +8,7 @@ from app.parsers.base import ParsedDocument, ParsedPage, ParsedTextBlock, Parsed
 class PDFParser:
     """PyMuPDF-backed source-text parser with no database dependencies."""
 
-    version = "pdf-parser-v1"
+    version = "pdf-parser-v2"
 
     def parse(self, pdf_path: Path) -> ParsedDocument:
         warnings: list[str] = []
@@ -16,7 +16,10 @@ class PDFParser:
 
         with fitz.open(str(pdf_path)) as pdf:
             for index, page in enumerate(pdf, start=1):
-                text = page.get_text("text").strip()
+                # PostgreSQL text values cannot contain NUL. Some PDFs expose
+                # embedded font/control data as U+0000 through PyMuPDF, so clean
+                # it once at the parser boundary before any derived pipeline uses it.
+                text = self._clean_text(page.get_text("text")).strip()
                 if not text:
                     warnings.append(f"第 {index} 页未检测到可提取文本，可能是扫描页或图片页。")
                 rect = page.rect
@@ -36,10 +39,10 @@ class PDFParser:
                 page_count=pdf.page_count,
                 pages=pages,
                 metadata={
-                    "title": metadata.get("title"),
-                    "author": metadata.get("author"),
-                    "subject": metadata.get("subject"),
-                    "keywords": metadata.get("keywords"),
+                    "title": self._clean_optional_text(metadata.get("title")),
+                    "author": self._clean_optional_text(metadata.get("author")),
+                    "subject": self._clean_optional_text(metadata.get("subject")),
+                    "keywords": self._clean_optional_text(metadata.get("keywords")),
                 },
                 warnings=warnings,
             )
@@ -66,7 +69,7 @@ class PDFParser:
             fallback_bbox = block.get("bbox", (0, 0, 0, 0))
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
-                    value = (span.get("text") or "").strip()
+                    value = PDFParser._clean_text(span.get("text") or "").strip()
                     if not value:
                         continue
                     x0, y0, x1, y1 = span.get("bbox", fallback_bbox)
@@ -84,3 +87,11 @@ class PDFParser:
                         )
                     )
         return blocks
+
+    @staticmethod
+    def _clean_text(value: str) -> str:
+        return value.replace("\x00", "")
+
+    @staticmethod
+    def _clean_optional_text(value: str | None) -> str | None:
+        return PDFParser._clean_text(value) if value is not None else None

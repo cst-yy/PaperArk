@@ -9,8 +9,10 @@ from dataclasses import dataclass, field
 from app.parsers.base import ParsedDocument, ParsedTextBlock
 
 _NUMBERED_HEADING = re.compile(
-    r"^(?P<number>\d+(?:\.\d+)*\.?|[IVXLC]+\.)\s+(?P<title>.{2,120})$",
-    re.IGNORECASE,
+    # Keep Roman section numbers conservative.  Supporting C/L/D/M here made
+    # bibliography lines such as ``C. Xu, ...`` look like section headings and
+    # split the References section at an author's initial.
+    r"^(?P<number>\d+(?:\.\d+)*\.?|[IVX]+\.)\s+(?P<title>.{2,120})$",
 )
 _COMMON_HEADINGS = {
     "abstract": "abstract",
@@ -33,6 +35,14 @@ _COMMON_HEADINGS = {
     "acknowledgments": "other",
     "acknowledgements": "other",
 }
+_REFERENCE_END = re.compile(
+    r"^(?:(?:neurips|iclr|conference)\s+)?paper checklist$|^supplement(?:ary material)?$|^appendix(?:\s+[a-z0-9]+)?$|^author (?:biography|biographies)$",
+    re.IGNORECASE,
+)
+_AUTHOR_BIO_START = re.compile(
+    r"^[A-Z][A-Za-z .'-]{1,80}\s+received the (?:B\.?S\.?|M\.?S\.?|Ph\.?D\.?)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -74,7 +84,10 @@ class SectionDetector:
                 line = " ".join(raw_line.split())
                 if not line:
                     continue
-                heading = self._heading_for(line, page.blocks)
+                # Inside a bibliography, ordinary heading-like words and author
+                # initials are reference content. Only explicit post-bibliography
+                # boundaries may end it.
+                heading = self._reference_end_heading(line) if current and current.section_type == "references" else self._heading_for(line, page.blocks)
                 if heading:
                     title, level, section_type = heading
                     while stack and stack[-1].level >= level:
@@ -159,6 +172,12 @@ class SectionDetector:
             if phrase in normalized:
                 return section_type
         return "other"
+
+    @staticmethod
+    def _reference_end_heading(line: str) -> tuple[str, int, str] | None:
+        if _REFERENCE_END.match(line) or _AUTHOR_BIO_START.match(line):
+            return line, 1, "other"
+        return None
 
 
 section_detector = SectionDetector()

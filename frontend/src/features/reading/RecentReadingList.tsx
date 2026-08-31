@@ -59,6 +59,7 @@ function RecentReadingCard({ item }: { item: RecentReadingItem }) {
     <article className="rounded-lg border border-gray-100 p-3 dark:border-slate-700">
       <h3 className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-gray-100">{item.paper.title}</h3>
       {sourceText && <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{sourceText}</p>}
+      {item.paper.my_author_roles && <p className="mt-1 text-[10px] font-medium text-violet-600 dark:text-violet-300">{roleLabel(item.paper.my_author_roles)}</p>}
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-slate-700">
         <div className="h-full rounded-full bg-primary-500" style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }} />
       </div>
@@ -71,6 +72,14 @@ function RecentReadingCard({ item }: { item: RecentReadingItem }) {
       </Link>
     </article>
   );
+}
+
+function roleLabel(role: NonNullable<RecentReadingItem["paper"]["my_author_roles"]>): string {
+  const labels:string[]=[];
+  if(role.is_first_author) labels.push("第一作者");
+  if(role.is_co_first) labels.push("共同一作");
+  if(role.is_corresponding) labels.push("通讯作者");
+  return labels.length ? labels.join(" · ") : `第 ${role.author_order + 1} 作者`;
 }
 
 function formatRecentTime(value: string): string {

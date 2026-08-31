@@ -99,6 +99,8 @@ export function ImportModal({ onClose }: ImportModalProps) {
         void parseDocument(documentId)
           .then(() => Promise.all([
             queryClient.invalidateQueries({ queryKey: ["papers"] }),
+            queryClient.invalidateQueries({ queryKey: ["paper-list"] }),
+            queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
             queryClient.invalidateQueries({ queryKey: ["paper", paper.id] }),
           ]))
           .catch(() => undefined);

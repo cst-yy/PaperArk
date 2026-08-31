@@ -56,6 +56,7 @@ from app.schemas.paper import (
     PaperUpdate,
     ReadingStatus,
     FolderBrief,
+    MyAuthorRoles,
     TagBrief,
 )
 
@@ -147,6 +148,8 @@ class PaperMapper:
                     orcid=pa.author.orcid,
                     affiliation=pa.author.affiliation,
                     author_order=pa.author_order,
+                    is_co_first=pa.is_co_first,
+                    is_corresponding=pa.is_corresponding,
                 )
                 for pa in authors
             ],
@@ -173,12 +176,14 @@ class PaperMapper:
         )
 
     @staticmethod
-    def to_list_response(paper: Paper) -> PaperListResponse:
+    def to_list_response(paper: Paper, identity_author_id: uuid.UUID | None = None) -> PaperListResponse:
         authors = sorted(paper.authors, key=lambda pa: pa.author_order)
         first_author = authors[0].author.name if authors else None
+        identity_link = next((link for link in authors if link.author_id == identity_author_id), None)
         return PaperListResponse(
             id=paper.id,
             title=paper.title,
+            title_zh=paper.title_zh,
             publication_year=paper.publication_year,
             journal=paper.journal,
             conference=paper.conference,
@@ -186,7 +191,12 @@ class PaperMapper:
             reading_status=paper.reading_status,
             is_starred=paper.is_starred,
             created_at=paper.created_at,
+            updated_at=paper.updated_at,
             first_author=first_author,
+            authors=[AuthorBrief(id=link.author.id, name=link.author.name,
+                orcid=link.author.orcid, affiliation=link.author.affiliation,
+                author_order=link.author_order, is_co_first=link.is_co_first,
+                is_corresponding=link.is_corresponding) for link in authors],
             tags=[
                 TagBrief(
                     id=pt.tag.id,
@@ -195,7 +205,14 @@ class PaperMapper:
                 )
                 for pt in paper.tags
             ],
+            keywords=PaperMapper._keyword_briefs(paper),
             has_document=bool(paper.documents),
+            my_author_roles=MyAuthorRoles(
+                author_order=identity_link.author_order,
+                is_first_author=identity_link.author_order == 0,
+                is_co_first=identity_link.is_co_first,
+                is_corresponding=identity_link.is_corresponding,
+            ) if identity_link else None,
         )
 
 
@@ -353,7 +370,11 @@ class PaperService:
                     orcid_map[author_data.orcid] = author
                 name_map.setdefault(author_data.name, []).append(author)
 
-            await self.repo.link_author(paper_id, author.id, idx)
+            await self.repo.link_author(
+                paper_id, author.id, idx,
+                is_co_first=author_data.is_co_first,
+                is_corresponding=author_data.is_corresponding,
+            )
 
     # ────────────────── Read ──────────────────
 
@@ -375,6 +396,15 @@ class PaperService:
         starred: bool | None = None,
         status: str | None = None,
         reading_status: ReadingStatus | None = None,
+        title_query: str | None = None,
+        author_query: str | None = None,
+        abstract_query: str | None = None,
+        venue_query: str | None = None,
+        keyword_query: str | None = None,
+        tag_query: str | None = None,
+        identifier_query: str | None = None,
+        identity_author_id: uuid.UUID | None = None,
+        author_role: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> PaperPageResponse:
@@ -387,12 +417,21 @@ class PaperService:
             starred=starred,
             status=status,
             reading_status=reading_status,
+            title_query=title_query,
+            author_query=author_query,
+            abstract_query=abstract_query,
+            venue_query=venue_query,
+            keyword_query=keyword_query,
+            tag_query=tag_query,
+            identifier_query=identifier_query,
+            identity_author_id=identity_author_id,
+            author_role=author_role,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
         total_pages = (result.total + page_size - 1) // page_size if result.total else 0
         return PaperPageResponse(
-            items=[PaperMapper.to_list_response(p) for p in result.items],
+            items=[PaperMapper.to_list_response(p, identity_author_id) for p in result.items],
             page=page,
             page_size=page_size,
             total=result.total,

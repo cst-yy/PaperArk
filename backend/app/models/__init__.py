@@ -3,7 +3,7 @@ from app.models.ai_analysis import AIAnalysis, AIAnalysisApplication, AIAnalysis
 from app.models.ai_infrastructure import AIProvider, AIModel, AIModelPricing, AIRequestRecord, AIBudgetPolicy, AIBudgetReservation
 from app.models.translation import PageBlock, PaperTranslation, TranslationBlock, TranslationJob, TranslationGlossary
 from app.models.ai_chat import AIChatSession, AIChatMessage, AIMessageCitation
-from app.models.author import Author, PaperAuthor
+from app.models.author import Author, PaperAuthor, ResearchIdentity
 from app.models.chunk import Chunk
 from app.models.document import Document
 from app.models.document_element import DocumentElement
@@ -23,12 +23,14 @@ from app.models.tag import PaperTag, Tag
 from app.models.user import User
 from app.models.todo import Todo
 from app.models.memo import Memo
+from app.models.manual_mind_map import ManualMindMapEdge, ManualMindMapNode
 
 __all__ = [
     "User",
     "Paper",
     "Author",
     "PaperAuthor",
+    "ResearchIdentity",
     "Document",
     "DocumentElement",
     "Section",
@@ -59,4 +61,6 @@ __all__ = [
     "Setting",
     "Todo",
     "Memo",
+    "ManualMindMapNode",
+    "ManualMindMapEdge",
 ]

@@ -121,6 +121,15 @@ class PaperRepository:
         starred: bool | None = None,
         status: str | None = None,
         reading_status: str | None = None,
+        title_query: str | None = None,
+        author_query: str | None = None,
+        abstract_query: str | None = None,
+        venue_query: str | None = None,
+        keyword_query: str | None = None,
+        tag_query: str | None = None,
+        identifier_query: str | None = None,
+        identity_author_id: uuid.UUID | None = None,
+        author_role: str | None = None,
         offset: int = 0,
         limit: int = 20,
     ) -> PaperListResult:
@@ -131,6 +140,7 @@ class PaperRepository:
             .options(
                 selectinload(Paper.authors).selectinload(PaperAuthor.author),
                 selectinload(Paper.tags).selectinload(PaperTag.tag),
+                selectinload(Paper.keywords).selectinload(PaperKeyword.keyword),
                 selectinload(Paper.documents).load_only(Document.id),
             )
         )
@@ -139,6 +149,29 @@ class PaperRepository:
             .select_from(Paper)
             .where(Paper.user_id == user_id)
         )
+
+        if identity_author_id is not None:
+            identity_link = exists(
+                select(PaperAuthor.id).where(
+                    PaperAuthor.paper_id == Paper.id,
+                    PaperAuthor.author_id == identity_author_id,
+                    *(
+                        (or_(PaperAuthor.author_order == 0, PaperAuthor.is_co_first.is_(True)),)
+                        if author_role == "first"
+                        else (PaperAuthor.is_corresponding.is_(True),)
+                        if author_role == "corresponding"
+                        else (
+                            PaperAuthor.author_order > 0,
+                            PaperAuthor.is_co_first.is_(False),
+                            PaperAuthor.is_corresponding.is_(False),
+                        )
+                        if author_role == "other"
+                        else ()
+                    ),
+                )
+            )
+            stmt = stmt.where(identity_link)
+            count_stmt = count_stmt.where(identity_link)
 
         if q and q.strip():
             pattern = f"%{q.strip()}%"
@@ -167,6 +200,7 @@ class PaperRepository:
             )
             metadata_match = or_(
                 Paper.title.ilike(pattern),
+                Paper.title_zh.ilike(pattern),
                 Paper.abstract.ilike(pattern),
                 Paper.doi.ilike(pattern),
                 Paper.arxiv_id.ilike(pattern),
@@ -179,6 +213,57 @@ class PaperRepository:
             )
             stmt = stmt.where(metadata_match)
             count_stmt = count_stmt.where(metadata_match)
+
+        # Field-specific advanced filters are intentionally combined with AND.
+        # Relationship filters use EXISTS so pagination and totals remain paper-level.
+        advanced_filters = []
+        if title_query and title_query.strip():
+            pattern = f"%{title_query.strip()}%"
+            advanced_filters.append(or_(Paper.title.ilike(pattern), Paper.title_zh.ilike(pattern)))
+        if abstract_query and abstract_query.strip():
+            advanced_filters.append(Paper.abstract.ilike(f"%{abstract_query.strip()}%"))
+        if venue_query and venue_query.strip():
+            pattern = f"%{venue_query.strip()}%"
+            advanced_filters.append(or_(
+                Paper.journal.ilike(pattern),
+                Paper.conference.ilike(pattern),
+                Paper.publisher.ilike(pattern),
+            ))
+        if identifier_query and identifier_query.strip():
+            pattern = f"%{identifier_query.strip()}%"
+            advanced_filters.append(or_(Paper.doi.ilike(pattern), Paper.arxiv_id.ilike(pattern)))
+        if author_query and author_query.strip():
+            pattern = f"%{author_query.strip()}%"
+            advanced_filters.append(exists(
+                select(PaperAuthor.id)
+                .join(Author, PaperAuthor.author_id == Author.id)
+                .where(PaperAuthor.paper_id == Paper.id, Author.name.ilike(pattern))
+            ))
+        if keyword_query and keyword_query.strip():
+            pattern = f"%{keyword_query.strip()}%"
+            advanced_filters.append(exists(
+                select(PaperKeyword.id)
+                .join(Keyword, PaperKeyword.keyword_id == Keyword.id)
+                .where(
+                    PaperKeyword.paper_id == Paper.id,
+                    Keyword.user_id == user_id,
+                    Keyword.display_name.ilike(pattern),
+                )
+            ))
+        if tag_query and tag_query.strip():
+            pattern = f"%{tag_query.strip()}%"
+            advanced_filters.append(exists(
+                select(PaperTag.id)
+                .join(Tag, PaperTag.tag_id == Tag.id)
+                .where(
+                    PaperTag.paper_id == Paper.id,
+                    Tag.user_id == user_id,
+                    Tag.name.ilike(pattern),
+                )
+            ))
+        if advanced_filters:
+            stmt = stmt.where(*advanced_filters)
+            count_stmt = count_stmt.where(*advanced_filters)
 
         if year:
             stmt = stmt.where(Paper.publication_year == year)
@@ -494,13 +579,16 @@ class PaperRepository:
         await self.db.flush()
 
     async def link_author(
-        self, paper_id: uuid.UUID, author_id: uuid.UUID, author_order: int
+        self, paper_id: uuid.UUID, author_id: uuid.UUID, author_order: int,
+        is_co_first: bool = False, is_corresponding: bool = False,
     ) -> None:
         self.db.add(
             PaperAuthor(
                 paper_id=paper_id,
                 author_id=author_id,
                 author_order=author_order,
+                is_co_first=is_co_first,
+                is_corresponding=is_corresponding,
             )
         )
         await self.db.flush()

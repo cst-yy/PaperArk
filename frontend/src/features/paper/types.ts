@@ -8,6 +8,8 @@ export interface Author {
   orcid?: string | null;
   affiliation?: string | null;
   author_order?: number;
+  is_co_first?: boolean;
+  is_corresponding?: boolean;
 }
 
 export interface TagBrief {
@@ -73,6 +75,7 @@ export interface Paper {
 export interface PaperListItem {
   id: string;
   title: string;
+  title_zh?: string | null;
   publication_year?: number | null;
   journal?: string | null;
   conference?: string | null;
@@ -80,9 +83,13 @@ export interface PaperListItem {
   reading_status: PaperReadingStatus;
   is_starred: boolean;
   created_at: string;
+  updated_at?: string;
   first_author?: string | null;
+  authors?: Author[];
   tags: TagBrief[];
+  keywords?: PaperKeywordBrief[];
   has_document?: boolean;
+  my_author_roles?: { author_order: number; is_first_author: boolean; is_co_first: boolean; is_corresponding: boolean } | null;
 }
 
 export interface PaperPage {
@@ -97,6 +104,8 @@ export interface AuthorInput {
   name: string;
   orcid?: string | null;
   affiliation?: string | null;
+  is_co_first?: boolean;
+  is_corresponding?: boolean;
 }
 
 export interface PaperMetadataUpdate {
@@ -141,8 +150,17 @@ export interface PaperListParams {
   starred?: boolean;
   status?: PaperProcessingStatus;
   reading_status?: PaperReadingStatus;
+  title_query?: string;
+  author_query?: string;
+  abstract_query?: string;
+  venue_query?: string;
+  keyword_query?: string;
+  tag_query?: string;
+  identifier_query?: string;
   page?: number;
   page_size?: number;
+  mine?: boolean;
+  author_role?: "first" | "corresponding" | "other";
 }
 
 export interface PaperCreateInput {

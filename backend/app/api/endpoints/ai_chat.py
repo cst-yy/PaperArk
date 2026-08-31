@@ -8,6 +8,7 @@ from app.schemas.ai_chat import *
 from app.schemas.note import NoteResponse
 from app.services.ai_chat_service import AIChatService
 from app.services.ai_gateway import AIBudgetExceededError
+from app.core.exceptions import GenerationProviderError
 
 router=APIRouter()
 
@@ -32,9 +33,9 @@ async def session(session_id:uuid.UUID,db:AsyncSession=Depends(get_db),user_id:u
 
 @router.patch("/chat-sessions/{session_id}",response_model=ChatSessionResponse)
 async def rename(session_id:uuid.UUID,data:ChatSessionUpdate,db:AsyncSession=Depends(get_db),user_id:uuid.UUID=Depends(get_current_user_id)):
-    try:row=await AIChatService(db).session(user_id,session_id)
+    try:row=await AIChatService(db).update_session(user_id,session_id,data)
     except LookupError as exc:raise HTTPException(404,detail=str(exc)) from exc
-    row.title=data.title;await db.flush();return row
+    return row
 
 
 @router.delete("/chat-sessions/{session_id}",status_code=204)
@@ -58,6 +59,7 @@ async def ask(session_id:uuid.UUID,data:ChatMessageCreate,db:AsyncSession=Depend
     except LookupError as exc:raise HTTPException(404,detail=str(exc)) from exc
     except PermissionError as exc:raise HTTPException(403,detail=str(exc)) from exc
     except AIBudgetExceededError as exc:raise HTTPException(402,detail=str(exc)) from exc
+    except GenerationProviderError as exc:raise HTTPException(503,detail="AI Provider 暂时无响应，请稍后重试") from exc
     except ValueError as exc:raise HTTPException(422,detail=str(exc)) from exc
 
 

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createAnnotation, deleteAnnotation, listAnnotations, updateAnnotation } from "./api";
-import type { CreateAnnotationInput, UpdateAnnotationInput } from "./types";
+import type { Annotation, CreateAnnotationInput, UpdateAnnotationInput } from "./types";
 
 export function annotationQueryKey(
   paperId: string,
@@ -39,7 +39,15 @@ export function useUpdateAnnotation(paperId: string) {
   return useMutation({
     mutationFn: ({ annotationId, input }: { annotationId: string; input: UpdateAnnotationInput }) =>
       updateAnnotation(annotationId, input),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["annotations", paperId] }),
+    onMutate: async ({ annotationId, input }) => {
+      await queryClient.cancelQueries({ queryKey: ["annotations", paperId] });
+      const snapshots = queryClient.getQueriesData<Annotation[]>({ queryKey: ["annotations", paperId] });
+      queryClient.setQueriesData<Annotation[]>({ queryKey: ["annotations", paperId] }, (current) => current?.map((annotation) => annotation.id === annotationId ? { ...annotation, ...input } : annotation));
+      return { snapshots };
+    },
+    onError: (_error, _variables, context) => context?.snapshots.forEach(([key, value]) => queryClient.setQueryData(key, value)),
+    onSuccess: (updated) => queryClient.setQueriesData<Annotation[]>({ queryKey: ["annotations", paperId] }, (current) => current?.map((annotation) => annotation.id === updated.id ? updated : annotation)),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["annotations", paperId] }),
   });
 }
 

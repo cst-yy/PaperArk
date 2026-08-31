@@ -54,7 +54,7 @@ export function ReaderToolbar({
   return (
     <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-3 dark:border-slate-700 dark:bg-slate-900">
       <Link
-        to="/library"
+        to="/papers"
         className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-slate-800"
       >
         <ChevronLeft className="h-4 w-4" />

@@ -61,7 +61,7 @@ async def test_parse_success_records_state_and_version(session, tmp_path, monkey
 
     assert result.parse_status == "ready"
     assert result.page_count == 1
-    assert result.parser_version == "pdf-parser-v1"
+    assert result.parser_version == "pdf-parser-v2"
     assert result.parsed_at is not None
     assert result.parse_error is None
     assert source.exists()
@@ -88,7 +88,7 @@ async def test_parse_failure_preserves_source_and_can_retry(session, tmp_path, m
     write_pdf(source, "Retry succeeds")
     retried = await service.parse_document(user.id, document.id)
     assert retried.parse_status == "ready"
-    assert retried.parser_version == "pdf-parser-v1"
+    assert retried.parser_version == "pdf-parser-v2"
 
 
 @pytest.mark.asyncio
@@ -114,3 +114,9 @@ async def test_processing_document_rejects_duplicate(session):
 
     with pytest.raises(DocumentParseInProgressError):
         await DocumentParseService(session).parse_document(user.id, document.id)
+
+
+def test_pdf_parser_removes_postgresql_incompatible_nul_characters():
+    assert PDFParser._clean_text("method\x00 result") == "method result"
+    assert PDFParser._clean_optional_text("author\x00") == "author"
+    assert PDFParser._clean_optional_text(None) is None

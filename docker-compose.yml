@@ -14,7 +14,11 @@ services:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
-      retries: 5
+      # A bind-mounted workspace can need WAL recovery and fsync after an
+      # interrupted Docker shutdown. Do not fail dependent services while
+      # PostgreSQL is still completing that safe recovery path.
+      start_period: 90s
+      retries: 12
 
   redis:
     image: redis:7-alpine
@@ -73,7 +77,10 @@ services:
       - /app/node_modules
     depends_on:
       - backend
-    command: npm run dev -- --host 0.0.0.0
+    # /app/node_modules is an isolated Linux volume. Keep it synchronized with
+    # the bind-mounted package-lock on every development-container start so a
+    # dependency added in source cannot be hidden by a stale anonymous volume.
+    command: sh -c "npm install --prefer-offline --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
 
   ai-worker:
     build: ./backend

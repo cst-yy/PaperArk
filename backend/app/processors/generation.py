@@ -62,16 +62,20 @@ class OpenAICompatibleGenerationProvider:
             raise GenerationProviderError("AI_API_KEY is not configured")
 
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            timeout = httpx.Timeout(180.0, connect=20.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                request_body = {
+                    "model": self.model_name,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+                if "dashscope.aliyuncs.com" in self.base_url:
+                    request_body["enable_thinking"] = True
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {self.api_key}"},
-                    json={
-                        "model": self.model_name,
-                        "messages": messages,
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                    },
+                    json=request_body,
                 )
                 response.raise_for_status()
                 payload = response.json()

@@ -47,8 +47,11 @@ class PageBlockResponse(BaseModel):
     block_order: int
     reading_order: int
     block_type: str
+    name: str
+    is_default: bool
     column_index: int | None
     bounding_box: dict | None
+    text_style: dict
     source_text: str
     source_hash: str
 
@@ -111,6 +114,43 @@ class TranslationJobResponse(BaseModel):
 class TranslationBlockUpdate(BaseModel):
     user_translation: str | None = Field(None, max_length=100000)
     expected_revision: int = Field(ge=1)
+
+
+class ManualTranslationBlockSave(BaseModel):
+    document_id: UUID
+    page_block_id: UUID
+    target_language: str = Field("zh-CN", min_length=2, max_length=16)
+    user_translation: str = Field(min_length=1, max_length=100000)
+    expected_revision: int | None = Field(None, ge=1)
+
+
+class PageBlockBBox(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    def as_dict(self) -> dict[str, float]:
+        if self.x + self.width > 1.000001 or self.y + self.height > 1.000001:
+            raise ValueError("bounding box is outside the page")
+        return self.model_dump()
+
+
+class CustomPageBlockCreate(BaseModel):
+    page_number: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=255)
+    bounding_box: PageBlockBBox
+
+
+class PageBlockTextStyle(BaseModel):
+    font_size: int = Field(12, ge=8, le=32)
+    color: str = Field("#1f2937", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class CustomPageBlockUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    bounding_box: PageBlockBBox | None = None
+    text_style: PageBlockTextStyle | None = None
 
 
 class GlossaryCreate(BaseModel):

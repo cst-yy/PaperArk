@@ -35,6 +35,7 @@ class RecentReadingPaper(BaseModel):
     publication_year: int | None = None
     authors: list[str] = []
     is_starred: bool
+    my_author_roles: dict[str, int | bool] | None = None
 
 
 class RecentReadingDocument(BaseModel):

@@ -17,6 +17,15 @@ class AuthorBrief(BaseModel):
     orcid: str | None = None
     affiliation: str | None = None
     author_order: int = 0
+    is_co_first: bool = False
+    is_corresponding: bool = False
+
+
+class MyAuthorRoles(BaseModel):
+    author_order: int
+    is_first_author: bool
+    is_co_first: bool
+    is_corresponding: bool
 
 
 class TagBrief(BaseModel):
@@ -180,6 +189,7 @@ class PaperResponse(ORMModel):
 class PaperListResponse(ORMModel):
     id: UUID
     title: str
+    title_zh: str | None = None
     publication_year: int | None = None
     journal: str | None = None
     conference: str | None = None
@@ -187,9 +197,13 @@ class PaperListResponse(ORMModel):
     reading_status: ReadingStatus
     is_starred: bool
     created_at: datetime
+    updated_at: datetime
     first_author: str | None = None
+    authors: list[AuthorBrief] = []
     tags: list[TagBrief] = []
+    keywords: list[PaperKeywordBrief] = []
     has_document: bool = False
+    my_author_roles: MyAuthorRoles | None = None
 
 
 class PaperPageResponse(BaseModel):

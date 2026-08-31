@@ -8,6 +8,7 @@ from app.schemas.common import ORMModel
 
 AnnotationType = Literal["highlight", "underline", "comment", "area"]
 AnnotationColor = Literal["yellow", "green", "blue", "red", "purple"]
+AnnotationLineStyle = Literal["solid", "dashed", "dotted", "double", "wavy"]
 
 
 class AnnotationCreate(BaseModel):
@@ -20,6 +21,7 @@ class AnnotationCreate(BaseModel):
     suffix_text: str | None = None
     position_data: dict[str, Any] | None = None
     color: AnnotationColor | None = None
+    line_style: AnnotationLineStyle | None = None
     comment: str | None = None
 
     # Compatibility inputs for annotations saved by the earlier reader prototype.
@@ -51,6 +53,7 @@ class AnnotationCreate(BaseModel):
 
 class AnnotationUpdate(BaseModel):
     color: AnnotationColor | None = None
+    line_style: AnnotationLineStyle | None = None
     comment: str | None = None
 
 
@@ -65,6 +68,7 @@ class AnnotationResponse(ORMModel):
     suffix_text: str | None = None
     position_data: dict[str, Any] | None = None
     color: AnnotationColor | None = None
+    line_style: AnnotationLineStyle | None = None
     comment: str | None = None
     content: str | None = None
     start_offset: int | None = None

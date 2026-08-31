@@ -13,6 +13,10 @@ _AUTHOR_YEAR_STARTER = re.compile(
     re.IGNORECASE,
 )
 _PAGE_NUMBER = re.compile(r"^(?:page\s+)?\d{1,4}$", re.IGNORECASE)
+_FLAT_AUTHOR_YEAR_START = re.compile(
+    r"(?:^|(?<=\.)\s+)(?P<start>[A-ZÀ-ÖØ-Þ][\w'’.-]+(?:\s+[A-ZÀ-ÖØ-Þ][\w'’.-]+)*,\s+(?:[A-Z](?:-[A-Z])?\.)+)",
+)
+_PARENTHESIZED_YEAR = re.compile(r"\((?:18|19|20)\d{2}[a-z]?\)\.", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -82,7 +86,63 @@ class ReferenceSegmenter:
                     section_id=section.id,
                 )
             )
+        # Some publisher PDFs expose every bibliography word as an individual
+        # text line. The line-oriented fallback then sees only one or two
+        # starters. Reconstruct the stream and split at sentence-boundary
+        # author-year starters; keep whichever deterministic strategy finds
+        # more real entries.
+        meaningful_fragments = [" ".join(item.text.split()) for item in section.fragments if item.text.strip()]
+        is_highly_fragmented = bool(meaningful_fragments) and (
+            sum(len(item.split()) <= 2 for item in meaningful_fragments) / len(meaningful_fragments) >= 0.75
+        )
+        if not uses_numbered_starters and is_highly_fragmented and len(results) <= 2:
+            flattened = self._segment_flat_author_year(section, start_index)
+            if len(flattened) > len(results):
+                return flattened
         return results
+
+    def _segment_flat_author_year(self, section: DetectedSection, start_index: int) -> list[ReferenceCandidate]:
+        pieces: list[str] = []
+        offsets: list[tuple[int, int]] = []
+        length = 0
+        for fragment in section.fragments:
+            value = " ".join(fragment.text.split())
+            if not value or self._is_noise(value):
+                continue
+            if pieces:
+                length += 1
+            offsets.append((length, fragment.page_number))
+            pieces.append(value)
+            length += len(value)
+        text = " ".join(pieces).strip()
+        if not text:
+            return []
+
+        starts = [match.start("start") for match in _FLAT_AUTHOR_YEAR_START.finditer(text)]
+        valid_starts = [position for index, position in enumerate(starts)
+            if _PARENTHESIZED_YEAR.search(text[position:(starts[index + 1] if index + 1 < len(starts) else len(text))])]
+        results: list[ReferenceCandidate] = []
+        for index, position in enumerate(valid_starts):
+            end = valid_starts[index + 1] if index + 1 < len(valid_starts) else len(text)
+            raw_text = text[position:end].strip()
+            if not raw_text:
+                continue
+            page_start = self._page_at(offsets, position)
+            page_end = self._page_at(offsets, max(position, end - 1))
+            results.append(ReferenceCandidate(
+                order_index=start_index + len(results), raw_text=raw_text,
+                page_start=page_start, page_end=page_end, section_id=section.id,
+            ))
+        return results
+
+    @staticmethod
+    def _page_at(offsets: list[tuple[int, int]], position: int) -> int:
+        page = offsets[0][1]
+        for offset, candidate_page in offsets:
+            if offset > position:
+                break
+            page = candidate_page
+        return page
 
     @staticmethod
     def _starter_body(line: str, *, allow_author_year: bool) -> str | None:
@@ -96,4 +156,3 @@ class ReferenceSegmenter:
     @staticmethod
     def _is_noise(line: str) -> bool:
         return bool(_PAGE_NUMBER.fullmatch(line))
-

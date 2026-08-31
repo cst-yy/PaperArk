@@ -40,6 +40,10 @@ async def test_annotation_service_enforces_document_and_user_scope(session):
     )
     assert annotation.document_id == owner_doc.id
     assert annotation.position_data["kind"] == "text"
+    styled = await service.update(owner_id, annotation.id, color="purple", line_style="dashed")
+    assert styled.color == "purple"
+    assert styled.line_style == "dashed"
+    assert styled.updated_at is not None
 
     with pytest.raises(AnnotationNotFoundError):
         await service.update(other_id, annotation.id, comment="attempted access")

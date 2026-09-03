@@ -64,6 +64,14 @@ services:
       redis:
         condition: service_healthy
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      # Do not let the frontend issue its first API requests while Uvicorn is
+      # still importing the application after a cold restart.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\" || exit 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 12
 
   frontend:
     build: ./frontend
@@ -76,11 +84,22 @@ services:
       - ./frontend:/app
       - /app/node_modules
     depends_on:
-      - backend
-    # /app/node_modules is an isolated Linux volume. Keep it synchronized with
-    # the bind-mounted package-lock on every development-container start so a
-    # dependency added in source cannot be hidden by a stale anonymous volume.
-    command: sh -c "npm install --prefer-offline --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+      backend:
+        condition: service_healthy
+    # /app/node_modules is an isolated Linux volume. Compare package metadata
+    # and only resolve dependencies when it changed; restarting the
+    # development stack otherwise goes straight to Vite.
+    command: >-
+      sh -c '
+        set -e;
+        until node -e "fetch(\"http://backend:8000/health\").then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"; do sleep 1; done;
+        deps_hash=$$(sha256sum package.json package-lock.json | sha256sum | cut -d" " -f1);
+        if [ ! -f node_modules/.paperark-deps-hash ] || [ "$$(cat node_modules/.paperark-deps-hash)" != "$$deps_hash" ]; then
+          npm install --prefer-offline --no-audit --no-fund;
+          printf "%s" "$$deps_hash" > node_modules/.paperark-deps-hash;
+        fi;
+        exec npm run dev -- --host 0.0.0.0
+      '
 
   ai-worker:
     build: ./backend

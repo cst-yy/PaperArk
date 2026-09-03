@@ -63,6 +63,12 @@ class TranslationService:
                 provider_id=None, model_id=model_id, prompt_version=PROMPT_VERSION,
                 parser_version=document.parser_version or "unknown", status="pending", is_active=True)
             self.db.add(translation); await self.db.flush()
+        else:
+            # A re-translation reuses the active aggregate. Mark it pending so
+            # clients polling the page do not stop at the previous completed
+            # status before the new job has written its blocks.
+            translation.status = "pending"
+            translation.completed_at = None
         job = TranslationJob(user_id=user_id, paper_id=paper_id, paper_translation_id=translation.id,
             scope_type=request.scope_type, scope_start=request.page_number, scope_end=request.page_number,
             model_id=model_id, source_language="en", target_language=request.target_language,
@@ -112,7 +118,12 @@ class TranslationService:
                         status="completed", translated_at=source.translated_at)
                     self.db.add(copied); existing[block.id] = copied
                 await self.db.flush()
-            targets = [b for b in batch if b.id not in existing or existing[b.id].status in {"pending", "failed"}]
+            # A previous worker failure can leave a row marked completed while
+            # both translation columns are empty. Treat that row as pending so
+            # a retry can actually populate the result instead of silently
+            # reporting a completed job with no visible translation.
+            targets = [b for b in batch if b.id not in existing or existing[b.id].status in {"pending", "failed"}
+                       or not (existing[b.id].machine_translation or existing[b.id].user_translation)]
             if not targets:
                 job.completed_blocks = min(job.total_blocks, job.completed_blocks + len(batch)); await self.db.commit(); continue
             protected = {str(b.id): self._protect(b.source_text) for b in targets}

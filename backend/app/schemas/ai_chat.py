@@ -14,6 +14,7 @@ class ChatSessionCreate(BaseModel):
 
 
 class ChatSessionUpdate(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     title: str | None = Field(None, min_length=1, max_length=255)
     model_id: UUID | None = None
 

@@ -87,6 +87,7 @@ class AIModelResponse(BaseModel):
 
 
 class AIDefaultModelUpdate(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     model_id: UUID
 
 
